@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#f5e9d5" />
+    <meta name="description" content="A ladeira é longa. O carrinho é duvidoso. Quanto tempo você aguenta?" />
+    <link rel="icon" href="data:," />
+    <title>Carrinho de Supermercado Desgovernado</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
+          "firebase/app": "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js",
+          "firebase/analytics": "https://www.gstatic.com/firebasejs/12.19.0/firebase-analytics.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js"
+        }
+      }
+    </script>
+    <script type="module" src="main.js"></script>
+  </head>
+  <body>
+    <main id="game" aria-label="Carrinho de Supermercado Desgovernado">
+      <canvas id="world" aria-label="Pista 3D do jogo"></canvas>
+      <div class="screen-wash"></div>
+      <div class="speed-lines" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Carrinho de Supermercado Desgovernado, início">
+          <span class="brand-mark" aria-hidden="true">↘</span>
+          <span>CARRINHO<br /><b>SEM FREIO</b></span>
+        </a>
+        <div class="status-pill"><span class="status-dot"></span><span id="phase-label">PRONTO PARA DESCER</span></div>
+        <button class="sound-toggle" id="sound-toggle" type="button" aria-label="Desativar som"><span id="sound-icon">♫</span><span>SOM</span><span class="sound-state" id="sound-state">ON</span></button>
+      </header>
+
+      <section class="hud" id="hud" aria-live="polite">
+        <div class="distance-panel glass-panel">
+          <span class="eyebrow">DISTÂNCIA</span>
+          <strong class="distance-value"><span id="distance">0</span><small>m</small></strong>
+          <div class="distance-rule"><span id="distance-fill"></span></div>
+          <span class="zone-name" id="zone-name">AQUECIMENTO</span>
+        </div>
+        <div class="stats-panel glass-panel">
+          <div class="stat-line"><span>VELOCIDADE</span><strong><span id="speed">0</span><small> km/h</small></strong></div>
+          <div class="stat-line score-line"><span>PONTUAÇÃO</span><strong id="score">0</strong></div>
+          <div class="stat-line"><span>MOEDAS</span><strong id="coins-collected">0</strong></div>
+          <div class="stat-line"><span>RECORDE</span><strong id="best-score">0 m</strong></div>
+          <div class="stat-line stat-heart"><span>CARRINHO</span><strong id="health" aria-label="1 tentativa restante">●</strong></div>
+        </div>
+        <div class="combo-badge" id="combo-badge"><span>SEQUÊNCIA</span><strong>COMBO <b id="combo">x1</b></strong></div>
+        <div class="powerup-badge" id="powerup-badge"><span id="powerup-icon">✦</span><strong id="powerup-name">TURBO</strong><small id="powerup-time">3.0 s</small></div>
+        <div class="toast" id="toast" role="status"></div>
+      </section>
+
+      <aside class="distance-card glass-panel is-hidden" id="side-record"><span>RECORDE DA LADEIRA</span><strong><span id="best-distance">0</span><small>m</small></strong><i>feito em casa, com orgulho</i></aside>
+
+      <div class="controls-hint" id="controls-hint"><span class="keycap">A</span><span class="keycap">D</span><span>ou</span><span class="keycap">←</span><span class="keycap">→</span><span>para desviar</span></div>
+      <div class="mobile-controls" id="mobile-controls" aria-label="Controles de direção">
+        <button class="steer-button" id="steer-left" type="button" aria-label="Virar à esquerda"><span>←</span><small>ESQUERDA</small></button>
+        <button class="steer-button" id="steer-right" type="button" aria-label="Virar à direita"><span>→</span><small>DIREITA</small></button>
+      </div>
+      <div class="drift-indicator" id="drift-indicator">FREIO DE MÃO PUXADO</div>
+
+      <section class="overlay menu-overlay" id="menu-overlay">
+        <div class="menu-layout">
+          <div class="menu-copy">
+            <span class="kicker"><i></i> UMA EXPERIÊNCIA DE BAIXÍSSIMO CONTROLE</span>
+            <h1>CARRINHO<br />DE SUPER<span class="title-accent">MERCADO</span><br /><span class="title-outline">DESGOVERNADO</span></h1>
+            <p>Você, um carrinho com uma roda torta e uma ladeira que devia ter sido interditada.</p>
+            <button class="primary-button" id="play-button" type="button"><span>JOGAR</span><b>↗</b></button>
+            <div class="menu-score"><span>SEU MELHOR PASSEIO</span><strong><span id="menu-best">0</span> <small>metros</small></strong></div>
+          </div>
+          <div class="menu-aside">
+            <div class="note-card"><span class="note-pin">✳</span><span class="eyebrow">AVISO DO MERCADO</span><p>Este carrinho não passou pela revisão.</p><span class="note-sign">— A gerência</span></div>
+            <div class="steering-guide"><span class="eyebrow">COMO CONTROLA</span><p><kbd>A</kbd> <kbd>D</kbd> ou setas <span>↔</span></p><small>A velocidade sobe com a pontuação · S reduz · Espaço derrapa</small></div>
+          </div>
+        </div>
+        <div class="menu-footer"><span>UMA DESCIDA SEM RESPONSÁVEIS</span><span>REC · ∞</span></div>
+      </section>
+
+      <section class="overlay gameover-overlay is-hidden" id="gameover-overlay">
+        <div class="gameover-card">
+          <span class="kicker"><i></i> FOI MAIS LONGE QUE O BOM SENSO</span>
+          <h2>FIM DE<br /><span>TRAJETO.</span></h2>
+          <div class="result-distance"><span>VOCÊ SOBREVIVEU POR</span><strong id="final-distance">0 <small>metros</small></strong></div>
+          <div class="result-grid">
+            <div><span>SCORE</span><strong id="final-score">0</strong></div>
+            <div><span>DESVIOS</span><strong id="final-dodges">0</strong></div>
+            <div><span>BATIDAS</span><strong id="final-hits">0</strong></div>
+            <div><span>VELOCIDADE MÁX.</span><strong id="final-speed">0 km/h</strong></div>
+          </div>
+          <p class="new-record is-hidden" id="new-record">✳ NOVO RECORDE DA LADEIRA!</p>
+          <div class="end-actions"><button class="primary-button" id="restart-button" type="button"><span>OUTRA VEZ</span><b>↗</b></button><button class="text-button" id="menu-button" type="button">VOLTAR AO MENU <span>↩</span></button></div>
+        </div>
+        <div class="gameover-stamp">REVISÃO<br />VENCIDA</div>
+      </section>
+
+      <footer class="bottomline"><span>DESCIDA Nº <b id="run-number">001</b></span><span id="bottom-tip">desvie. respire. repita.</span><span>FABRICADO SEM PLANO DE FUGA <b>✳</b></span></footer>
+    </main>
+  </body>
+</html>

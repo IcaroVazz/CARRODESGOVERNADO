@@ -1,0 +1,48 @@
+[debug] [2026-10-05T17:53:42.086Z] ----------------------------------------------------------------------
+[debug] [2026-10-05T17:53:42.089Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\bin\firebase.js init firestore --project carrinho-d139f
+[debug] [2026-10-05T17:53:42.089Z] CLI Version:   15.32.1
+[debug] [2026-10-05T17:53:42.090Z] Platform:      win32
+[debug] [2026-10-05T17:53:42.090Z] Node Version:  v24.19.0
+[debug] [2026-10-05T17:53:42.090Z] Detected Agent: codex_cli
+[debug] [2026-10-05T17:53:42.090Z] Time:          Mon Oct 05 2026 14:53:42 GMT-0300 (Horário Padrão de Brasília)
+[debug] [2026-10-05T17:53:42.091Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-05T17:53:42.104Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  C:\Workspace\CARRINHO SEM FREIO
+
+Before we get started, keep in mind:
+
+  * You are currently outside your home directory
+  * You are initializing within an existing Firebase project directory
+
+[debug] [2026-10-05T17:53:43.267Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-10-05T17:53:43.268Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[debug] [2026-10-05T17:53:54.076Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-05T17:53:54.158Z] Error: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.
+    at GoogleAuth.getApplicationDefaultAsync (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\google-auth-library\build\src\auth\googleauth.js:287:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GoogleAuth._GoogleAuth_determineClient (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\google-auth-library\build\src\auth\googleauth.js:834:32)
+    at async GoogleAuth.getClient (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\google-auth-library\build\src\auth\googleauth.js:698:20)
+    at async GoogleAuth.getAccessToken (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\google-auth-library\build\src\auth\googleauth.js:722:24)
+    at async autoAuth (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\requireAuth.js:38:19)
+    at async requireAuth (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\requireAuth.js:100:20)
+    at async Object.doSetup (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\init\features\project.js:28:9)
+    at async init (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\init\index.js:98:13)
+    at async Command.initAction [as actionFn] (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\commands\init.js:232:5)
+[error] 
+[error] Error: Failed to authenticate, have you run firebase login?

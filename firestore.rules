@@ -1,0 +1,64 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function ownsPlayer(playerId) {
+      return request.auth != null && request.auth.uid == playerId;
+    }
+
+    function validPlayer(playerId, data) {
+      return data.keys().hasOnly([
+          'playerId', 'createdAt', 'lastSeenAt', 'lastPlayedAt',
+          'gamesPlayed', 'totalCoins', 'bestScore', 'bestDistance'
+        ])
+        && data.keys().hasAll([
+          'playerId', 'createdAt', 'lastSeenAt',
+          'gamesPlayed', 'totalCoins', 'bestScore', 'bestDistance'
+        ])
+        && data.playerId == playerId
+        && data.createdAt is timestamp
+        && data.lastSeenAt is timestamp
+        && (!data.keys().hasAny(['lastPlayedAt']) || data.lastPlayedAt is timestamp)
+        && data.gamesPlayed is int && data.gamesPlayed >= 0
+        && data.totalCoins is int && data.totalCoins >= 0
+        && data.bestScore is int && data.bestScore >= 0
+        && data.bestDistance is int && data.bestDistance >= 0;
+    }
+
+    function validRun(data) {
+      return data.keys().hasOnly([
+          'score', 'distance', 'coins', 'dodges', 'hits', 'maxSpeed', 'createdAt'
+        ])
+        && data.keys().hasAll([
+          'score', 'distance', 'coins', 'dodges', 'hits', 'maxSpeed', 'createdAt'
+        ])
+        && data.score is int && data.score >= 0
+        && data.distance is int && data.distance >= 0
+        && data.coins is int && data.coins >= 0
+        && data.dodges is int && data.dodges >= 0
+        && data.hits is int && data.hits >= 0
+        && data.maxSpeed is int && data.maxSpeed >= 0
+        && data.createdAt is timestamp;
+    }
+
+    match /players/{playerId} {
+      allow read: if ownsPlayer(playerId);
+      allow create: if ownsPlayer(playerId)
+        && validPlayer(playerId, request.resource.data);
+      allow update: if ownsPlayer(playerId)
+        && validPlayer(playerId, request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.gamesPlayed >= resource.data.gamesPlayed
+        && request.resource.data.totalCoins >= resource.data.totalCoins
+        && request.resource.data.bestScore >= resource.data.bestScore
+        && request.resource.data.bestDistance >= resource.data.bestDistance;
+      allow delete: if false;
+
+      match /runs/{runId} {
+        allow read: if ownsPlayer(playerId);
+        allow create: if ownsPlayer(playerId) && validRun(request.resource.data);
+        allow update, delete: if false;
+      }
+    }
+  }
+}
