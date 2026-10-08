@@ -7,6 +7,7 @@ import {
   leaveMultiplayerRoom,
   listenMultiplayerRoom,
   loadFirebasePlayer,
+  MULTIPLAYER_START_X,
   requestMultiplayerRematch,
   saveFirebaseRun,
   startMultiplayerRematch,
@@ -19,6 +20,31 @@ const $ = (id) => document.getElementById(id);
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
 const damp = (a, b, lambda, dt) => THREE.MathUtils.damp(a, b, lambda, dt);
+const softAngle = (value = 0) => ({ value, velocity: 0 });
+const softPoint = (position) => ({
+  position: position.clone(), velocity: new THREE.Vector3(), delta: new THREE.Vector3(),
+});
+function stepSoftAngle(state, target, dt, stiffness = 34, drag = 8) {
+  state.velocity += (target - state.value) * stiffness * dt;
+  state.velocity *= Math.exp(-drag * dt);
+  state.value += state.velocity * dt;
+  return state.value;
+}
+function stepSoftPoint(state, target, dt, stiffness = 34, drag = 8) {
+  state.delta.copy(target).sub(state.position);
+  state.velocity.addScaledVector(state.delta, stiffness * dt);
+  state.velocity.multiplyScalar(Math.exp(-drag * dt));
+  state.position.addScaledVector(state.velocity, dt);
+  return state.position;
+}
+function moveRiderSegment(mesh, start, end) {
+  const direction = mesh.userData.riderSegmentDirection;
+  direction.subVectors(end, start);
+  const length = Math.max(direction.length(), .001);
+  mesh.position.copy(start).add(end).multiplyScalar(.5);
+  mesh.quaternion.setFromUnitVectors(THREE.Object3D.DEFAULT_UP, direction.normalize());
+  mesh.scale.y = length;
+}
 const random = (a, b) => a + Math.random() * (b - a);
 const choose = (values) => values[Math.floor(Math.random() * values.length)];
 const slope = 0.055;
@@ -27,6 +53,9 @@ const ROAD_WIDTH = 18;
 const SEGMENT_LENGTH = 54;
 const SEGMENT_COUNT = 6;
 const MAX_COLLISIONS = 1;
+const MP_SYNC_INTERVAL = .16;
+const MP_INTERPOLATION_DELAY_MS = 240;
+const MP_MAX_EXTRAPOLATION = .25;
 const number = (n) => Math.floor(n).toLocaleString('pt-BR');
 
 const COLORS = {
@@ -337,7 +366,7 @@ class TrackGenerator {
 class Cart {
   constructor() {
     this.group = new THREE.Group(); this.wheels = []; this.reaction = new THREE.Group(); this.group.add(this.reaction);
-    this.handleHalfWidth = .48; this.handleY = 1.16; this.handleZ = 1.29; this.updateRiderPose = null;
+    this.handleHalfWidth = .48; this.handleY = 1.16; this.handleZ = 1.29;
     this.riderWobbleTime = 0;
     this.buildBasket(); this.buildFrame(); this.buildWheels(); this.buildRider();
     this.group.add(this.reaction);
@@ -404,8 +433,8 @@ class Cart {
   buildRider() {
     const riderPivot = new THREE.Group(); riderPivot.position.set(0, this.handleY, this.handleZ); this.reaction.add(riderPivot);
     const rider = new THREE.Group();
-    rider.position.set(.16, .10 - this.handleY, 2.42 - this.handleZ);
-    rider.rotation.x = -.68;
+    rider.position.set(0, -this.handleY, -this.handleZ);
+    rider.rotation.set(0, 0, 0);
     rider.scale.setScalar(1.08);
     riderPivot.add(rider);
 
@@ -418,75 +447,183 @@ class Cart {
     const helmetRed = material(0xc72f45, .4, .08);
     const visor = material(0x18364a, .24, .18);
 
-    // Narrow rounded torso, with a colored back panel visible from the chase camera.
+    const makeSegment = (radius, mat) => {
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 9), mat);
+      mesh.userData.riderSegmentDirection = new THREE.Vector3();
+      rider.add(mesh); return mesh;
+    };
+    const makeJoint = (radius, mat) => {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 8), mat);
+      rider.add(mesh); return mesh;
+    };
+
+    // Torso pivots at the hips so the upper body can lag behind the cart.
+    const torsoJoint = new THREE.Group(); torsoJoint.position.set(0, 1.10, 1.58); rider.add(torsoJoint);
     const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.215, .30, 5, 12), jersey);
-    torso.scale.set(1, 1, .82); torso.position.set(0, .56, .015); torso.rotation.x = .12; rider.add(torso);
+    torso.scale.set(1, 1, .82); torso.position.set(0, .22, -.005); torso.rotation.x = .12; torsoJoint.add(torso);
     const backPanel = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), jerseyTrim);
-    backPanel.scale.set(.13, .22, .035); backPanel.position.set(0, .57, .194); rider.add(backPanel);
+    backPanel.scale.set(.13, .22, .035); backPanel.position.set(0, .23, .174); torsoJoint.add(backPanel);
     const belt = new THREE.Mesh(new THREE.TorusGeometry(.175, .026, 6, 14), material(0x203b4c, .78));
-    belt.position.set(0, .34, .02); belt.rotation.x = Math.PI / 2; rider.add(belt);
+    belt.position.set(0, 0, 0); belt.rotation.x = Math.PI / 2; torsoJoint.add(belt);
 
+    const headJoint = new THREE.Group(); headJoint.position.set(0, .55, -.055); torsoJoint.add(headJoint);
     const neck = new THREE.Mesh(new THREE.CapsuleGeometry(.085, .10, 3, 8), skin);
-    neck.position.set(0, .88, -.035); neck.rotation.x = -.16; rider.add(neck);
+    neck.position.set(0, -.01, .02); neck.rotation.x = -.16; headJoint.add(neck);
     const head = new THREE.Mesh(new THREE.SphereGeometry(.205, 14, 10), skin);
-    head.position.set(0, 1.045, -.105); rider.add(head);
+    head.position.set(0, .155, -.05); headJoint.add(head);
     const helmet = new THREE.Mesh(new THREE.SphereGeometry(.255, 16, 12), helmetShell);
-    helmet.scale.set(1, .88, 1.08); helmet.position.set(0, 1.105, -.11); rider.add(helmet);
+    helmet.scale.set(1, .88, 1.08); helmet.position.set(0, .215, -.055); headJoint.add(helmet);
     const helmetCrown = new THREE.Mesh(new THREE.SphereGeometry(.262, 14, 8, 0, Math.PI * 2, 0, Math.PI * .40), helmetRed);
-    helmetCrown.scale.set(1, .72, 1.04); helmetCrown.position.set(0, 1.13, -.105); rider.add(helmetCrown);
+    helmetCrown.scale.set(1, .72, 1.04); helmetCrown.position.set(0, .24, -.05); headJoint.add(helmetCrown);
     const helmetBand = new THREE.Mesh(new THREE.TorusGeometry(.226, .025, 6, 20), helmetRed);
-    helmetBand.position.set(0, 1.095, -.11); helmetBand.rotation.x = Math.PI / 2 - .12; rider.add(helmetBand);
+    helmetBand.position.set(0, .205, -.055); helmetBand.rotation.x = Math.PI / 2 - .12; headJoint.add(helmetBand);
     const helmetVisor = new THREE.Mesh(new THREE.SphereGeometry(.19, 12, 7, 0, Math.PI, 0, Math.PI * .42), visor);
-    helmetVisor.scale.set(1, .8, .42); helmetVisor.position.set(0, 1.065, -.303); helmetVisor.rotation.x = -.18; rider.add(helmetVisor);
+    helmetVisor.scale.set(1, .8, .42); helmetVisor.position.set(0, .175, -.248); helmetVisor.rotation.x = -.18; headJoint.add(helmetVisor);
 
+    const arms = [];
+    const legs = [];
     for (const side of [-1, 1]) {
-      const hip = new THREE.Vector3(side * .12, .34, .02);
-      const knee = new THREE.Vector3(side * .17, .25, .34);
-      const ankle = new THREE.Vector3(side * .18, .15, .18);
-      rodBetween(rider, hip, knee, .105, pants, 9);
-      rodBetween(rider, knee, ankle, .078, pants, 9);
-      const shoeMesh = new THREE.Mesh(new THREE.CapsuleGeometry(.073, .15, 4, 8), shoe);
-      shoeMesh.position.set(side * .18, .12, .12); shoeMesh.rotation.x = Math.PI / 2; rider.add(shoeMesh);
+      const hipLocal = new THREE.Vector3(side * .12, 0, .01);
+      const kneeStart = new THREE.Vector3(side * .17, .61, 1.82);
+      const ankleStart = new THREE.Vector3(side * .18, .14, 1.75);
+      const kneeJoint = makeJoint(.105, pants); const ankleJoint = makeJoint(.078, pants);
+      const boot = new THREE.Mesh(new THREE.CapsuleGeometry(.073, .15, 4, 8), shoe); rider.add(boot);
+      legs.push({
+        side, hipLocal, upper: makeSegment(.105, pants), lower: makeSegment(.078, pants),
+        kneeJoint, ankleJoint, boot, knee: softPoint(kneeStart), ankle: softPoint(ankleStart),
+        kneeStart, ankleStart, hipPoint: new THREE.Vector3(), kneeTarget: new THREE.Vector3(),
+        ankleTarget: new THREE.Vector3(), kneeOffset: new THREE.Vector3(), ankleOffset: new THREE.Vector3(),
+        footDirection: new THREE.Vector3(),
+      });
 
-      const shoulder = new THREE.Vector3(side * .19, .78, .005);
-      const elbow = new THREE.Vector3(side * .34, .91, -.13);
-      const handPoint = new THREE.Vector3(side * .46, 1.02, -.34);
+      const shoulder = new THREE.Vector3(side * .19, .44, -.015);
       const shoulderCap = new THREE.Mesh(new THREE.SphereGeometry(.115, 10, 8), jersey);
-      shoulderCap.position.copy(shoulder); rider.add(shoulderCap);
-      rodBetween(rider, shoulder, elbow, .082, jersey, 9);
-      rodBetween(rider, elbow, handPoint, .053, skin, 9);
-      const wrist = new THREE.Mesh(new THREE.SphereGeometry(.062, 9, 7), skin);
-      wrist.position.copy(handPoint); rider.add(wrist);
-      const glove = new THREE.Mesh(new THREE.SphereGeometry(.068, 9, 7), jerseyTrim);
-      glove.scale.set(1, .72, 1.1); glove.position.copy(handPoint).add(new THREE.Vector3(0, -.01, -.055)); rider.add(glove);
+      shoulderCap.position.copy(shoulder); torsoJoint.add(shoulderCap);
+      const elbowStart = new THREE.Vector3(side * .34, 1.35, 1.39);
+      const wrist = makeJoint(.058, skin); const glove = makeJoint(.073, jerseyTrim);
+      glove.scale.set(1, .78, 1.16);
+      arms.push({
+        side, shoulderLocal: shoulder, upper: makeSegment(.082, jersey), lower: makeSegment(.053, skin),
+        elbowJoint: makeJoint(.079, jersey), elbow: softPoint(elbowStart), elbowStart, wrist, glove,
+        shoulderPoint: new THREE.Vector3(), gripPoint: new THREE.Vector3(), elbowTarget: new THREE.Vector3(),
+      });
     }
 
     const chestMark = new THREE.Mesh(new THREE.SphereGeometry(.12, 10, 7), helmetRed);
-    chestMark.scale.set(.56, .58, .22); chestMark.position.set(0, .62, -.178); rider.add(chestMark);
-    this.rider = rider; this.riderJersey = jersey; this.riderHelmetAccent = helmetRed;
+    chestMark.scale.set(.56, .58, .22); chestMark.position.set(0, .28, -.198); torsoJoint.add(chestMark);
+    this.rider = rider;
     this.riderPivot = riderPivot; this.riderBaseScale = rider.scale.clone();
-    this.riderPivotBasePosition = riderPivot.position.clone(); this.proceduralRiderParts = [...rider.children];
+    this.riderPivotBasePosition = riderPivot.position.clone(); this.riderBaseRotation = rider.rotation.clone();
+    this.riderPose = {
+      torsoJoint, headJoint, arms, legs,
+      torsoPosition: softPoint(torsoJoint.position), headPosition: softPoint(headJoint.position),
+      torsoTarget: new THREE.Vector3(), headTarget: new THREE.Vector3(),
+      torsoAngles: [softAngle(), softAngle(), softAngle()],
+      headAngles: [softAngle(), softAngle(), softAngle()],
+    };
+  }
+  resetRiderPose() {
+    const pose = this.riderPose;
+    this.riderPivot.position.copy(this.riderPivotBasePosition); this.riderPivot.rotation.set(0, 0, 0);
+    this.rider.rotation.copy(this.riderBaseRotation); this.rider.scale.copy(this.riderBaseScale);
+    pose.torsoPosition.position.set(0, 1.10, 1.58); pose.torsoPosition.velocity.set(0, 0, 0);
+    pose.headPosition.position.set(0, .55, -.055); pose.headPosition.velocity.set(0, 0, 0);
+    pose.torsoJoint.position.copy(pose.torsoPosition.position); pose.torsoJoint.rotation.set(0, 0, 0);
+    pose.headJoint.position.copy(pose.headPosition.position); pose.headJoint.rotation.set(0, 0, 0);
+    for (const angles of [pose.torsoAngles, pose.headAngles]) {
+      for (const angle of angles) { angle.value = 0; angle.velocity = 0; }
+    }
+    for (const limb of [...pose.arms, ...pose.legs]) {
+      limb.elbow && (limb.elbow.position.copy(limb.elbowStart), limb.elbow.velocity.set(0, 0, 0));
+      limb.knee && (limb.knee.position.copy(limb.kneeStart), limb.knee.velocity.set(0, 0, 0));
+      limb.ankle && (limb.ankle.position.copy(limb.ankleStart), limb.ankle.velocity.set(0, 0, 0));
+    }
+    this.riderWobbleTime = 0;
   }
   update(dt, speed, steer, bump, active) {
     this.wheels.forEach((wheel, i) => { wheel.rotation.x += dt * speed * 1.7; wheel.rotation.z = steer * (i < 2 ? -.05 : .05); });
     this.reaction.rotation.z = damp(this.reaction.rotation.z, -steer * .12 + bump, 8, dt);
     this.reaction.rotation.x = damp(this.reaction.rotation.x, active ? Math.min(.045, speed * .0007) : 0, 3, dt);
-    this.riderWobbleTime += dt * (active ? 1.2 : .75);
-    const t = this.riderWobbleTime; const looseness = active ? 1 : .42;
+    const step = Math.min(dt, .05);
+    this.riderWobbleTime += dt * (active ? 1.35 : .7);
+    const t = this.riderWobbleTime; const looseness = active ? 1 : .28;
+    const pose = this.riderPose;
+    const jolt = clamp(bump, -.9, .9);
+    const sway = clamp(-steer * .48 + jolt * 1.25, -.75, .75);
+
     this.riderPivot.position.copy(this.riderPivotBasePosition);
     this.riderPivot.position.y += Math.sin(t * 6.4) * .008 * looseness;
-    this.riderPivot.rotation.set(
-      Math.sin(t * 4.7) * .085 * looseness + bump * .42,
-      Math.sin(t * 5.8 + .9) * .105 * looseness,
-      Math.sin(t * 3.6 + .4) * .072 * looseness + steer * .025,
+
+    const torsoTarget = pose.torsoTarget.set(
+      Math.sin(t * 4.1) * .018 * looseness - steer * .035,
+      1.10 + Math.sin(t * 8.2) * .012 * looseness + Math.max(0, jolt) * .025,
+      1.58 + Math.sin(t * 3.6 + .7) * .018 * looseness,
     );
-    const squash = Math.sin(t * 8.1 + .6) * looseness;
-    this.rider.scale.set(
-      this.riderBaseScale.x * (1 - squash * .006),
-      this.riderBaseScale.y * (1 + squash * .012),
-      this.riderBaseScale.z * (1 - squash * .006),
+    stepSoftPoint(pose.torsoPosition, torsoTarget, step, 30, 6.8);
+    pose.torsoJoint.position.copy(pose.torsoPosition.position);
+    const torsoTargets = [
+      .04 + this.reaction.rotation.x * .8 + Math.sin(t * 4.8) * .035 * looseness + jolt * .42,
+      steer * .13 + Math.sin(t * 3.4) * .045 * looseness,
+      -steer * .31 + jolt * 1.18 + Math.sin(t * 3.8 + .4) * .045 * looseness,
+    ];
+    pose.torsoJoint.rotation.set(
+      stepSoftAngle(pose.torsoAngles[0], torsoTargets[0], step, 25, 5.4),
+      stepSoftAngle(pose.torsoAngles[1], torsoTargets[1], step, 25, 5.4),
+      stepSoftAngle(pose.torsoAngles[2], torsoTargets[2], step, 25, 5.4),
     );
-    if (this.updateRiderPose) this.updateRiderPose();
+
+    const headTarget = pose.headTarget.set(
+      0,
+      .55 + Math.sin(t * 5.4 + .5) * .012 * looseness,
+      -.055 + Math.sin(t * 4.3) * .02 * looseness,
+    );
+    stepSoftPoint(pose.headPosition, headTarget, step, 24, 5.2);
+    pose.headJoint.position.copy(pose.headPosition.position);
+    pose.headJoint.rotation.set(
+      stepSoftAngle(pose.headAngles[0], -pose.torsoAngles[0].value * .44 + Math.sin(t * 4.1 + 1) * .065 * looseness, step, 18, 4.4),
+      stepSoftAngle(pose.headAngles[1], -pose.torsoAngles[1].value * .5 + Math.sin(t * 3.2 + .7) * .07 * looseness, step, 18, 4.4),
+      stepSoftAngle(pose.headAngles[2], -pose.torsoAngles[2].value * .46 + Math.sin(t * 3.4 + .9) * .055 * looseness, step, 18, 4.4),
+    );
+
+    // Update matrices before solving each wrist back onto the handle bar.
+    this.group.updateMatrixWorld(true);
+    for (const arm of pose.arms) {
+      const shoulder = this.rider.worldToLocal(pose.torsoJoint.localToWorld(arm.shoulderPoint.copy(arm.shoulderLocal)));
+      const grip = this.rider.worldToLocal(this.reaction.localToWorld(arm.gripPoint.set(
+        arm.side * this.handleHalfWidth * .80, this.handleY + .015, this.handleZ + .025,
+      )));
+      const elbowTarget = arm.elbowTarget.copy(shoulder).lerp(grip, .48);
+      elbowTarget.x += arm.side * (.045 + sway * .055);
+      elbowTarget.y += .055 + Math.sin(t * 5 + arm.side) * .035 * looseness;
+      elbowTarget.z += .11 + Math.abs(jolt) * .08;
+      stepSoftPoint(arm.elbow, elbowTarget, step, 31, 6.4);
+      moveRiderSegment(arm.upper, shoulder, arm.elbow.position);
+      moveRiderSegment(arm.lower, arm.elbow.position, grip);
+      arm.elbowJoint.position.copy(arm.elbow.position);
+      arm.wrist.position.copy(grip);
+      arm.glove.position.set(grip.x, grip.y - .006, grip.z - .025);
+    }
+
+    for (const leg of pose.legs) {
+      const hip = this.rider.worldToLocal(pose.torsoJoint.localToWorld(leg.hipPoint.copy(leg.hipLocal)));
+      const phase = t * 5.1 + leg.side * .8;
+      const kneeTarget = leg.kneeTarget.copy(hip).add(leg.kneeOffset.set(
+        leg.side * (.045 + sway * .06), -.50 + Math.sin(phase) * .035 * looseness,
+        .22 + Math.sin(phase) * .04 * looseness + Math.abs(jolt) * .06,
+      ));
+      stepSoftPoint(leg.knee, kneeTarget, step, 27, 5.8);
+      const ankleTarget = leg.ankleTarget.copy(leg.knee.position).add(leg.ankleOffset.set(
+        leg.side * .018, -.45 + Math.sin(phase - .6) * .025 * looseness,
+        -.06 + Math.sin(phase - .6) * .035 * looseness,
+      ));
+      stepSoftPoint(leg.ankle, ankleTarget, step, 24, 5.4);
+      moveRiderSegment(leg.upper, hip, leg.knee.position);
+      moveRiderSegment(leg.lower, leg.knee.position, leg.ankle.position);
+      leg.kneeJoint.position.copy(leg.knee.position); leg.ankleJoint.position.copy(leg.ankle.position);
+      leg.boot.position.set(leg.ankle.position.x, leg.ankle.position.y - .015, leg.ankle.position.z + .07);
+      const footDirection = leg.footDirection.set(0, .035, .24 + Math.sin(phase) * .025 * looseness).normalize();
+      leg.boot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), footDirection);
+    }
   }
 }
 
@@ -644,7 +781,7 @@ class ParticleSystem {
 class AssetManager {
   constructor(game) {
     this.game = game; this.loader = new GLTFLoader(); this.cartLoaded = true;
-    this.loadCart(); this.loadRider(); this.loadObstacleModels(); this.loadPickupModels();
+    this.loadCart(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadPickupModels() {
     const specs = [
@@ -729,124 +866,9 @@ class AssetManager {
       this.game.cart.riderPivotBasePosition.copy(this.game.cart.riderPivot.position);
       this.game.setMultiplayerCartModel(model, size, scale);
       this.cartLoaded = true;
-      if (this.localRiderModel) this.poseRiderOnCart(this.localRiderModel, this.game.cart);
     }, undefined, (error) => console.warn('Modelo do carrinho indisponível; usando o modelo integrado.', error));
   }
-  loadRider() {
-    const url = new URL('./3DMODELS/stickmanFet.glb', import.meta.url).href;
-    this.loader.load(url, (gltf) => {
-      const model = gltf.scene; const bounds = new THREE.Box3().setFromObject(model); const size = bounds.getSize(new THREE.Vector3());
-      const center = bounds.getCenter(new THREE.Vector3());
-      const scale = 1.82 / (this.game.cart.rider.scale.y * size.y);
-      model.scale.setScalar(scale);
-      model.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
-      model.rotation.y = Math.PI;
-      model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      model.name = 'modelo-stickmanFet-template';
-      this.riderModel = model;
-      const localModel = model.clone(true);
-      localModel.name = 'modelo-stickmanFet';
-      for (const part of this.game.cart.proceduralRiderParts) part.visible = false;
-      this.game.cart.rider.add(localModel);
-      this.localRiderModel = localModel;
-      this.game.cart.updateRiderPose = null;
-      this.poseRiderOnCart(localModel, this.game.cart);
-      this.game.setMultiplayerRiderModel(model);
-      this.riderLoaded = true;
-    }, undefined, (error) => console.warn('Modelo do personagem indisponível; usando o personagem integrado.', error));
-  }
-  poseRiderOnCart(model, cart = this.game.cart) {
-    let pose = model.userData.cartPose;
-    if (!pose) {
-      pose = { meshes: [] };
-      model.traverse((object) => {
-        if (!object.isMesh || !object.geometry?.getAttribute('position')) return;
-        object.geometry = object.geometry.clone();
-        pose.meshes.push({
-          mesh: object,
-          source: object.geometry.getAttribute('position').array.slice(),
-        });
-      });
-      model.userData.cartPose = pose;
-    }
 
-    model.updateWorldMatrix(true, true); cart.group.updateMatrixWorld(true);
-    const vertexGroups = [];
-    const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
-    for (const entry of pose.meshes) {
-      const { mesh, source } = entry;
-      const attribute = mesh.geometry.getAttribute('position');
-      attribute.array.set(source);
-      const meshToModel = modelInverse.clone().multiply(mesh.matrixWorld);
-      const modelToMesh = meshToModel.clone().invert();
-      const points = new Array(attribute.count);
-      for (let i = 0; i < attribute.count; i++) {
-        points[i] = new THREE.Vector3(source[i * 3], source[i * 3 + 1], source[i * 3 + 2]).applyMatrix4(meshToModel);
-      }
-      entry.attribute = attribute; entry.modelToMesh = modelToMesh; entry.points = points;
-      vertexGroups.push(...points.map((point, index) => ({ entry, point, index })));
-    }
-    if (!vertexGroups.length) return;
-
-    const bounds = new THREE.Box3(); vertexGroups.forEach(({ point }) => bounds.expandByPoint(point));
-    const size = bounds.getSize(new THREE.Vector3());
-    const halfWidth = Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x));
-    const height = Math.max(size.y, 1e-4);
-    const smoothstep = (edge0, edge1, value) => {
-      const t = clamp((value - edge0) / Math.max(edge1 - edge0, 1e-5), 0, 1);
-      return t * t * (3 - 2 * t);
-    };
-    const targets = [-1, 1].map((side) => {
-      const handX = clamp(cart.rider.position.x + side * .14, -cart.handleHalfWidth * .88, cart.handleHalfWidth * .88);
-      const world = cart.reaction.localToWorld(new THREE.Vector3(handX, cart.handleY + .02, cart.handleZ + .02));
-      return model.worldToLocal(world);
-    }).sort((a, b) => a.x - b.x);
-
-    for (const side of [-1, 1]) {
-      const shoulderVertices = vertexGroups.filter(({ point }) => {
-        const across = side * point.x;
-        return across > halfWidth * .15 && across < halfWidth * .36
-          && point.y > bounds.min.y + height * .49 && point.y < bounds.min.y + height * .74;
-      });
-      const handVertices = vertexGroups.filter(({ point }) => {
-        const across = side * point.x;
-        return across > halfWidth * .80
-          && point.y > bounds.min.y + height * .55 && point.y < bounds.min.y + height * .70;
-      });
-      if (!shoulderVertices.length || !handVertices.length) continue;
-
-      const average = (vertices) => vertices.reduce((sum, vertex) => sum.add(vertex.point), new THREE.Vector3()).multiplyScalar(1 / vertices.length);
-      const shoulder = average(shoulderVertices);
-      const hand = average(handVertices);
-      const target = targets.find((point) => side * point.x > 0) || targets[side > 0 ? 1 : 0];
-      const from = hand.clone().sub(shoulder);
-      const to = target.clone().sub(shoulder);
-      if (from.lengthSq() < 1e-8 || to.lengthSq() < 1e-8) continue;
-      const rotation = new THREE.Quaternion().setFromUnitVectors(from.clone().normalize(), to.clone().normalize());
-      const reachScale = clamp(to.length() / from.length(), .85, 1.18);
-
-      for (const vertex of vertexGroups) {
-        const { point, entry, index } = vertex;
-        const along = side * (point.x - shoulder.x);
-        if (along <= 0 || point.y < bounds.min.y + height * .43 || point.y > bounds.min.y + height * .78) continue;
-        const armWeight = smoothstep(.015, from.length() * .42, along);
-        const heightWeight = smoothstep(bounds.min.y + height * .43, bounds.min.y + height * .56, point.y)
-          * (1 - smoothstep(bounds.min.y + height * .71, bounds.min.y + height * .78, point.y));
-        const weight = armWeight * heightWeight;
-        if (weight < .001) continue;
-
-        const moved = point.clone().sub(shoulder).applyQuaternion(rotation).multiplyScalar(reachScale).add(shoulder);
-        moved.lerp(point, 1 - weight).applyMatrix4(entry.modelToMesh);
-        entry.attribute.setXYZ(index, moved.x, moved.y, moved.z);
-      }
-    }
-
-    for (const { mesh } of pose.meshes) {
-      mesh.geometry.getAttribute('position').needsUpdate = true;
-      mesh.geometry.computeVertexNormals();
-      mesh.geometry.computeBoundingBox(); mesh.geometry.computeBoundingSphere();
-    }
-  }
 }
 
 class Game {
@@ -864,11 +886,11 @@ class Game {
     this.mp = {
       code: null, role: null, playerId: null, hostId: null, playerIds: [], players: [], allPlayers: [], racePlayerIds: [],
       unsubscribe: null, heartbeat: 0, syncTimer: 0, uiTimer: 0,
-      finished: false, resultsRequested: false, rematchStarting: false, pingSeen: new Map(),
+      finished: false, resultsRequested: false, rematchStarting: false,
+      pingSeen: new Map(), motionBuffers: new Map(), motionSignatures: new Map(),
     };
     this.remoteCarts = new Map();
     this.multiplayerCartModel = null;
-    this.multiplayerRiderModel = null;
     this.audio = new AudioManager();
     this.setupThree();
     this.makeWorld();
@@ -949,8 +971,10 @@ class Game {
   }
   setupControls() {
     const keyMap = { KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', KeyS: 'down', ArrowDown: 'down' };
+    const isTextEntry = (target) => target instanceof Element
+      && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
     window.addEventListener('keydown', (e) => {
-      if (keyMap[e.code]) { e.preventDefault(); this.key[keyMap[e.code]] = true; }
+      if (keyMap[e.code] && !isTextEntry(e.target)) { e.preventDefault(); this.key[keyMap[e.code]] = true; }
       if (e.code === 'Enter' && (this.phase === 'menu' || this.phase === 'gameover')) this.start();
       else if (e.code === 'Enter' && this.phase === 'mp-lobby' && !ui.mpJoinBlock.classList.contains('is-hidden')) this.confirmJoin();
     });
@@ -983,6 +1007,12 @@ class Game {
     ui.mpBack.addEventListener('click', () => { this.audio.play('click'); ui.mpMenu.classList.add('is-hidden'); this.toMenu(); });
     ui.mpCreate.addEventListener('click', () => this.hostRoom());
     ui.mpJoin.addEventListener('click', () => { this.audio.play('click'); this.showLobby('join'); this.setMpStatus(''); });
+    ui.mpCodeInput.addEventListener('input', () => {
+      const normalized = ui.mpCodeInput.value.toUpperCase()
+        .replace(/[^ABCDEFGHJKMNPQRSTUVWXYZ23456789]/g, '')
+        .slice(0, 6);
+      if (ui.mpCodeInput.value !== normalized) ui.mpCodeInput.value = normalized;
+    });
     ui.mpJoinConfirm.addEventListener('click', () => this.confirmJoin());
     ui.mpStart.addEventListener('click', () => {
       this.audio.play('click');
@@ -1021,9 +1051,7 @@ class Game {
     this.track.segments.forEach((segment, i) => {
       const z = SEGMENT_LENGTH / 2 - SEGMENT_LENGTH * i; segment.group.position.set(0, slope * z, z); segment.group.rotation.x = -Math.asin(slope);
     });
-    this.cart.group.position.set(0, .11, 0); this.cart.reaction.rotation.set(0, 0, 0); this.cart.rider.rotation.set(-.8, 0, 0);
-    this.cart.riderPivot.rotation.set(0, 0, 0); this.cart.riderPivot.position.copy(this.cart.riderPivotBasePosition);
-    this.cart.rider.scale.copy(this.cart.riderBaseScale); this.cart.riderWobbleTime = 0;
+    this.cart.group.position.set(0, .11, 0); this.cart.reaction.rotation.set(0, 0, 0); this.cart.resetRiderPose();
     this.camera.position.set(0, 6, 10.7); this.cameraController.shake = 0;
     ui.menu.classList.add('is-hidden'); ui.gameover.classList.add('is-hidden'); ui.hud.classList.add('is-visible'); ui.sideRecord.classList.add('is-hidden');
     ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.add('is-hidden'); ui.mpResult.classList.add('is-hidden'); ui.mpScore.classList.add('is-hidden');
@@ -1173,7 +1201,7 @@ class Game {
     clearInterval(this.mp.heartbeat);
     this.mp.unsubscribe = listenMultiplayerRoom(this.mp.code, (room, players) => this.onRoomUpdate(room, players));
     this.mp.heartbeat = setInterval(() => {
-      if (this.mp.code && (this.phase === 'mp-lobby' || this.phase === 'mp-result')) {
+      if (this.mp.code && this.phase === 'mp-result') {
         void updateMultiplayerPlayer(this.mp.code, this.mp.playerId, this.mpPlayerState());
       }
     }, 2500);
@@ -1199,6 +1227,62 @@ class Game {
     }
     return performance.now() - previous.seenAt < 15000;
   }
+  recordRemoteMotion(players) {
+    const receivedAt = performance.now();
+    for (const player of players) {
+      if (player.id === this.mp.playerId || !Number(player.speed)) continue;
+      const stamp = player.ping?.toMillis?.() ?? '';
+      const sample = {
+        receivedAt,
+        x: clamp(Number(player.x) || 0, -7.25, 7.25),
+        distance: Math.max(0, Number(player.distance) || 0),
+        speed: Math.max(0, Number(player.speed) || 0),
+        score: Math.max(0, Number(player.score) || 0),
+        alive: player.alive !== false,
+      };
+      const signature = `${stamp}:${sample.x}:${sample.distance}:${sample.speed}:${sample.score}:${sample.alive}`;
+      if (this.mp.motionSignatures.get(player.id) === signature) continue;
+      this.mp.motionSignatures.set(player.id, signature);
+      const samples = this.mp.motionBuffers.get(player.id) || [];
+      samples.push(sample);
+      while (samples.length > 2 && samples[1].receivedAt < receivedAt - 1800) samples.shift();
+      if (samples.length > 16) samples.splice(0, samples.length - 16);
+      this.mp.motionBuffers.set(player.id, samples);
+    }
+  }
+  interpolatedRemoteMotion(player, now) {
+    const samples = this.mp.motionBuffers.get(player.id) || [];
+    if (!samples.length) return {
+      x: clamp(Number(player.x) || 0, -7.25, 7.25),
+      distance: Math.max(0, Number(player.distance) || 0),
+      speed: Math.max(0, Number(player.speed) || 0),
+    };
+
+    const renderAt = now - MP_INTERPOLATION_DELAY_MS;
+    if (renderAt <= samples[0].receivedAt) return samples[0];
+    for (let index = 1; index < samples.length; index++) {
+      const older = samples[index - 1];
+      const newer = samples[index];
+      if (renderAt > newer.receivedAt) continue;
+      const span = Math.max(1, newer.receivedAt - older.receivedAt);
+      const amount = clamp((renderAt - older.receivedAt) / span, 0, 1);
+      return {
+        x: lerp(older.x, newer.x, amount),
+        distance: lerp(older.distance, newer.distance, amount),
+        speed: lerp(older.speed, newer.speed, amount),
+      };
+    }
+
+    const latest = samples[samples.length - 1];
+    const ahead = Math.min(MP_MAX_EXTRAPOLATION, Math.max(0, (renderAt - latest.receivedAt) / 1000));
+    const previous = samples.length > 1 ? samples[samples.length - 2] : null;
+    let x = latest.x;
+    if (previous) {
+      const span = (latest.receivedAt - previous.receivedAt) / 1000;
+      if (span > .02) x = clamp(latest.x + clamp((latest.x - previous.x) / span, -7, 7) * ahead, -7.25, 7.25);
+    }
+    return { x, distance: latest.distance + latest.speed * ahead, speed: latest.speed };
+  }
   onRoomUpdate(room, players = []) {
     if (!this.mp.code) return;
     if (!room) {
@@ -1211,6 +1295,7 @@ class Game {
     this.mp.playerIds = Array.isArray(room.playerIds) ? room.playerIds : [];
     this.mp.allPlayers = players;
     this.mp.players = players.filter((player) => this.mp.playerIds.includes(player.id));
+    this.recordRemoteMotion(this.mp.players);
     if (room.status === 'closed') {
       this.setMpStatus('O anfitrião encerrou a sala.');
       this.leaveRoom(true);
@@ -1247,16 +1332,10 @@ class Game {
     }
     if (room.status === 'finished' && this.phase === 'mp-playing') this.showMultiplayerResult(room);
   }
-  makeRemoteCart(playerId, seat) {
+  makeRemoteCart(playerId) {
     let cart = this.remoteCarts.get(playerId);
     if (cart) return cart;
-    const colors = [0xe84e5b, 0x34a76d, 0xf1a928, 0x875bd1, 0x00a5a5, 0x2788d3];
     cart = new Cart();
-    const color = colors[seat % colors.length];
-    cart.multiplayerColor = color;
-    cart.riderJersey.color.setHex(color);
-    cart.riderHelmetAccent.color.setHex(color);
-    cart.proceduralNose.material.color.setHex(color);
     cart.shadow.material = new THREE.MeshBasicMaterial({ color: 0x5a3226, transparent: true, opacity: .19, depthWrite: false });
     if (this.multiplayerCartModel) this.installMultiplayerCartModel(cart);
     this.scene.add(cart.group);
@@ -1281,31 +1360,8 @@ class Game {
     cart.riderPivotBasePosition.copy(cart.riderPivot.position);
     const clone = model.clone(true);
     clone.name = 'modelo-carro-multiplayer';
-    const accent = new THREE.Color(cart.multiplayerColor ?? 0x34a76d);
-    clone.traverse((object) => {
-      if (!object.isMesh) return;
-      const tint = (source) => {
-        const copy = source.clone();
-        if (copy.color) copy.color.lerp(accent, .28);
-        return copy;
-      };
-      object.material = Array.isArray(object.material) ? object.material.map(tint) : tint(object.material);
-    });
     cart.reaction.add(clone);
     cart.group.userData.hasMultiplayerCartModel = true;
-  }
-  setMultiplayerRiderModel(model) {
-    this.multiplayerRiderModel = model;
-    for (const cart of this.remoteCarts.values()) this.installMultiplayerRiderModel(cart);
-  }
-  installMultiplayerRiderModel(cart) {
-    if (!this.multiplayerRiderModel || cart.group.userData.hasMultiplayerRiderModel) return;
-    for (const part of cart.proceduralRiderParts) part.visible = false;
-    const rider = this.multiplayerRiderModel.clone(true);
-    rider.name = 'modelo-personagem-multiplayer';
-    cart.rider.add(rider);
-    this.assets.poseRiderOnCart(rider, cart);
-    cart.group.userData.hasMultiplayerRiderModel = true;
   }
   startMultiplayer() {
     if (this.phase === 'mp-playing') return;
@@ -1314,9 +1370,18 @@ class Game {
     this.mp.finished = false; this.mp.resultsRequested = false; this.mp.syncTimer = 0; this.mp.uiTimer = 0;
     this.mp.racePlayerIds = [...this.mp.playerIds];
     const seat = Math.max(0, this.mp.playerIds.indexOf(this.mp.playerId));
-    const startX = [-6.1, -3.7, -1.2, 1.2, 3.7, 6.1][seat] || 0;
+    const startX = MULTIPLAYER_START_X[seat] ?? 0;
     this.playerX = startX;
     this.cart.group.position.x = this.playerX;
+    this.mp.motionBuffers.clear(); this.mp.motionSignatures.clear();
+    const startedAt = performance.now();
+    this.mp.playerIds.forEach((id, remoteSeat) => {
+      if (id === this.mp.playerId) return;
+      this.mp.motionBuffers.set(id, [{
+        receivedAt: startedAt, x: MULTIPLAYER_START_X[remoteSeat] ?? 0,
+        distance: 0, speed: 17, score: 0, alive: true,
+      }]);
+    });
     for (const cart of this.remoteCarts.values()) cart.group.visible = false;
     ui.mpScore.classList.remove('is-hidden');
     ui.phase.textContent = 'CORRIDA MULTIPLAYER';
@@ -1352,19 +1417,20 @@ class Game {
   updateMultiplayer(dt) {
     const byId = new Map(this.mp.players.map((player) => [player.id, player]));
     const activeRemoteIds = new Set();
-    for (const [seat, id] of this.mp.playerIds.entries()) {
+    for (const id of this.mp.playerIds) {
       if (id === this.mp.playerId) continue;
       const player = byId.get(id);
       if (!player) continue;
       activeRemoteIds.add(id);
-      const cart = this.makeRemoteCart(id, seat);
+      const cart = this.makeRemoteCart(id);
       cart.group.visible = true;
-      const targetZ = clamp(this.distance - (Number(player.distance) || 0), -80, 15);
+      const motion = this.interpolatedRemoteMotion(player, performance.now());
+      const targetZ = clamp(this.distance - motion.distance, -80, 15);
       const previousX = cart.group.position.x;
-      cart.group.position.z = damp(cart.group.position.z, targetZ, 8, dt);
-      cart.group.position.x = damp(previousX, Number(player.x) || 0, 8, dt);
+      cart.group.position.z = targetZ;
+      cart.group.position.x = motion.x;
       const remoteSteer = clamp((cart.group.position.x - previousX) / Math.max(dt, .001) / 6, -1, 1);
-      cart.update(dt, player.speed || this.speed, remoteSteer, 0, true);
+      cart.update(dt, motion.speed || this.speed, remoteSteer, 0, true);
     }
     for (const [id, cart] of this.remoteCarts) {
       if (!activeRemoteIds.has(id)) cart.group.visible = false;
@@ -1373,7 +1439,7 @@ class Game {
     if (!this.mp.finished) {
       this.mp.syncTimer -= dt;
       if (this.mp.syncTimer <= 0) {
-        this.mp.syncTimer = .35;
+        this.mp.syncTimer = MP_SYNC_INTERVAL;
         void updateMultiplayerPlayer(this.mp.code, this.mp.playerId, this.mpPlayerState());
       }
     }
@@ -1456,6 +1522,7 @@ class Game {
     this.mp.code = null; this.mp.role = null; this.mp.playerId = null; this.mp.hostId = null;
     this.mp.playerIds = []; this.mp.players = []; this.mp.allPlayers = []; this.mp.racePlayerIds = [];
     this.mp.finished = false; this.mp.resultsRequested = false;
+    this.mp.pingSeen.clear(); this.mp.motionBuffers.clear(); this.mp.motionSignatures.clear();
     for (const cart of this.remoteCarts.values()) cart.group.visible = false;
     if (!silent) this.audio.play('click');
     this.toMenu();

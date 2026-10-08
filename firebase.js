@@ -124,6 +124,7 @@ export async function saveFirebaseRun(run) {
 }
 
 const ROOM_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export const MULTIPLAYER_START_X = Object.freeze([-6.1, -3.7, -1.2, 1.2, 3.7, 6.1]);
 
 function generateRoomCode() {
   let code = '';
@@ -202,7 +203,15 @@ export async function startMultiplayerRoom(code, hostId) {
     const room = snapshot.data();
     if (room.hostId !== hostId) throw new Error('not-host');
     if (room.status !== 'waiting') throw new Error('unavailable');
-    if ((room.playerIds || []).length < 2) throw new Error('need-players');
+    const playerIds = room.playerIds || [];
+    if (playerIds.length < 2) throw new Error('need-players');
+    const playerRefs = playerIds.map((id) => doc(db, 'rooms', code, 'players', id));
+    const playerSnapshots = await Promise.all(playerRefs.map((playerRef) => transaction.get(playerRef)));
+    if (playerSnapshots.some((player) => !player.exists())) throw new Error('unavailable');
+    playerRefs.forEach((playerRef, seat) => transaction.set(playerRef, {
+      ready: true, x: MULTIPLAYER_START_X[seat] ?? 0, distance: 0,
+      speed: 17, score: 0, alive: true, ping: serverTimestamp(),
+    }, { merge: true }));
     transaction.update(roomRef, { status: 'playing', winner: null, rematch: {} });
     return true;
   });
@@ -232,8 +241,9 @@ export async function startMultiplayerRematch(code) {
     const playerRefs = playerIds.map((id) => doc(db, 'rooms', code, 'players', id));
     const playerSnapshots = await Promise.all(playerRefs.map((playerRef) => transaction.get(playerRef)));
     if (playerSnapshots.some((player) => !player.exists())) throw new Error('unavailable');
-    playerRefs.forEach((playerRef) => transaction.set(playerRef, {
-      ready: true, x: 0, distance: 0, speed: 0, score: 0, alive: true, ping: serverTimestamp(),
+    playerRefs.forEach((playerRef, seat) => transaction.set(playerRef, {
+      ready: true, x: MULTIPLAYER_START_X[seat] ?? 0, distance: 0,
+      speed: 17, score: 0, alive: true, ping: serverTimestamp(),
     }, { merge: true }));
     transaction.update(roomRef, { status: 'playing', winner: null, rematch: {} });
     return true;
