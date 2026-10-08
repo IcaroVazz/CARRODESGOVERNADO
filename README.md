@@ -19,11 +19,17 @@ O multiplayer usa salas do Cloud Firestore e não exige conta nem login. Crie um
 Para habilitar salas sem autenticação, entre no CLI com uma conta que administra o projeto e publique as regras incluídas. Esse login serve só para configurar o Firebase; os jogadores continuam sem login:
 
 ```powershell
-npx.cmd firebase login --reauth
-npx.cmd firebase deploy --only firestore:rules
+.\node_modules\.bin\firebase.cmd login --reauth
+.\node_modules\.bin\firebase.cmd deploy --only firestore:rules --project carrinho-d139f
 ```
 
 As regras permitem leitura e escrita pública apenas para os dados das salas multiplayer. Os IDs dos participantes ficam na sessão do navegador e não representam contas autenticadas. Como não há autenticação, qualquer pessoa com o código da sala pode alterar os dados daquela partida; use esse modo para corridas casuais, sem placar confiável contra trapaças.
+
+As coleções são criadas automaticamente pelo Firestore quando o primeiro documento é gravado; não é necessário semear dados manualmente:
+
+- `rooms/{codigo}` guarda o anfitrião, estado da corrida, participantes, vencedor e confirmações de revanche.
+- `rooms/{codigo}/players/{id}` guarda presença e estado de cada carrinho (`x`, distância, velocidade, pontos, vida e ping).
+- `players/{uid}` e `players/{uid}/runs/{runId}` guardam recordes pessoais opcionais do modo solo; as regras dessas coleções exigem a sessão anônima do Firebase.
 
 ## Controles
 

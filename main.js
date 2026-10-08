@@ -1108,7 +1108,7 @@ class Game {
       const code = String(error?.code || error?.message || '').toLowerCase();
       const reason = String(error?.code || error?.name || 'erro-desconhecido').replace(/^firestore\//, '');
       if (code.includes('permission-denied')) {
-        this.setMpStatus(`Acesso negado [${reason}]. Rode npx.cmd firebase login --reauth e depois npx.cmd firebase deploy --only firestore:rules --project carrinho-d139f.`, true);
+        this.setMpStatus(`Acesso negado [${reason}]. No PowerShell, rode .\\node_modules\\.bin\\firebase.cmd login --reauth e depois .\\node_modules\\.bin\\firebase.cmd deploy --only firestore:rules --project carrinho-d139f.`, true);
       } else if (code.includes('unavailable') || code.includes('network')) {
         this.setMpStatus(`Sem conexão com o Firestore [${reason}]. Confira a internet.`, true);
       } else {
