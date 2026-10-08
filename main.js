@@ -20,31 +20,6 @@ const $ = (id) => document.getElementById(id);
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
 const damp = (a, b, lambda, dt) => THREE.MathUtils.damp(a, b, lambda, dt);
-const softAngle = (value = 0) => ({ value, velocity: 0 });
-const softPoint = (position) => ({
-  position: position.clone(), velocity: new THREE.Vector3(), delta: new THREE.Vector3(),
-});
-function stepSoftAngle(state, target, dt, stiffness = 34, drag = 8) {
-  state.velocity += (target - state.value) * stiffness * dt;
-  state.velocity *= Math.exp(-drag * dt);
-  state.value += state.velocity * dt;
-  return state.value;
-}
-function stepSoftPoint(state, target, dt, stiffness = 34, drag = 8) {
-  state.delta.copy(target).sub(state.position);
-  state.velocity.addScaledVector(state.delta, stiffness * dt);
-  state.velocity.multiplyScalar(Math.exp(-drag * dt));
-  state.position.addScaledVector(state.velocity, dt);
-  return state.position;
-}
-function moveRiderSegment(mesh, start, end) {
-  const direction = mesh.userData.riderSegmentDirection;
-  direction.subVectors(end, start);
-  const length = Math.max(direction.length(), .001);
-  mesh.position.copy(start).add(end).multiplyScalar(.5);
-  mesh.quaternion.setFromUnitVectors(THREE.Object3D.DEFAULT_UP, direction.normalize());
-  mesh.scale.y = length;
-}
 const random = (a, b) => a + Math.random() * (b - a);
 const choose = (values) => values[Math.floor(Math.random() * values.length)];
 const slope = 0.055;
@@ -135,21 +110,26 @@ class AudioManager {
 }
 
 class CameraController {
-  constructor(camera, player) { this.camera = camera; this.player = player; this.shake = 0; this.fov = 69; }
+  constructor(camera, player) {
+    this.camera = camera; this.player = player; this.shake = 0; this.fov = 69;
+    this.target = new THREE.Vector3(); this.lookTarget = new THREE.Vector3();
+  }
   bump(amount = .4) { this.shake = Math.min(1.25, this.shake + amount); }
   update(dt, speed, active) {
     const p = this.player.position;
     const shakeX = (Math.random() - .5) * this.shake;
     const shakeY = (Math.random() - .5) * this.shake * .55;
-    const target = new THREE.Vector3(p.x * .32 + shakeX, 4.6 + shakeY + (active ? Math.min(1.2, speed / 75) : 0), 10.7);
+    const target = this.target.set(p.x * .32 + shakeX, 4.6 + shakeY + (active ? Math.min(1.2, speed / 75) : 0), 10.7);
     this.camera.position.x = damp(this.camera.position.x, target.x, 3.4, dt);
     this.camera.position.y = damp(this.camera.position.y, target.y, 2.8, dt);
     this.camera.position.z = damp(this.camera.position.z, target.z, 2.6, dt);
-    const look = new THREE.Vector3(p.x * .23, .9 + shakeY * .4, -8.5);
+    const look = this.lookTarget.set(p.x * .23, .9 + shakeY * .4, -8.5);
     this.camera.lookAt(look);
     const wantedFov = active ? 69 + clamp((speed - 17) / 24, 0, 1) * 12 : 69;
     this.fov = damp(this.fov, wantedFov, 2, dt);
-    this.camera.fov = this.fov; this.camera.updateProjectionMatrix();
+    if (Math.abs(this.camera.fov - this.fov) > .001) {
+      this.camera.fov = this.fov; this.camera.updateProjectionMatrix();
+    }
     this.shake = Math.max(0, this.shake - dt * 2.1);
   }
 }
@@ -157,6 +137,15 @@ class CameraController {
 class TrackGenerator {
   constructor(world, onPass) {
     this.world = world; this.onPass = onPass; this.segments = []; this.roadMaterial = asphaltMaterial();
+    this.segmentMarking = {
+      tileGeometry: new THREE.BoxGeometry(3.45, .018, .07),
+      tileMaterial: material(0xc0d7e5, .9, 0, 0, true),
+      laneGeometry: new THREE.PlaneGeometry(.12, 3.15),
+      laneMaterial: material(0xf8fcff, .82, 0, 0, true),
+      edgeGeometry: new THREE.BoxGeometry(.085, .013, 7.4),
+      edgePaint: material(0xf8fcff, .82, 0, 0, true),
+      edgeCurb: material(0x9eb7c8, .94, 0, 0, true),
+    };
     this.makeContinuousSurface();
     this.buildStaticHouses();
     for (let i = 0; i < SEGMENT_COUNT; i++) {
@@ -302,24 +291,45 @@ class TrackGenerator {
   createSegment(z) {
     const group = new THREE.Group();
     group.position.set(0, slope * z, z); group.rotation.x = -Math.asin(slope);
-    const curbMat = material(0x9eb7c8, .94, 0, 0, true);
-    const paintMat = material(0xf8fcff, .82, 0, 0, true);
+    const dummy = new THREE.Object3D();
+    const markings = this.segmentMarking;
+    const tileLines = new THREE.InstancedMesh(markings.tileGeometry, markings.tileMaterial, 10);
+    tileLines.name = 'sidewalk-tile-lines'; tileLines.castShadow = false; tileLines.receiveShadow = false;
+    let tileIndex = 0;
     for (const side of [-1, 1]) {
       for (let k = 0; k < 5; k++) {
-        const tileLine = new THREE.Mesh(new THREE.BoxGeometry(3.45, .018, .07), material(0xc0d7e5, .9, 0, 0, true));
-        tileLine.position.set(side * 10.72, .018, -SEGMENT_LENGTH / 2 + 5.5 + k * 10.4); group.add(tileLine);
+        dummy.position.set(side * 10.72, .018, -SEGMENT_LENGTH / 2 + 5.5 + k * 10.4);
+        dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix();
+        tileLines.setMatrixAt(tileIndex++, dummy.matrix);
       }
     }
+    tileLines.instanceMatrix.needsUpdate = true; group.add(tileLines);
+
+    const laneMarks = new THREE.InstancedMesh(markings.laneGeometry, markings.laneMaterial, 7);
+    laneMarks.name = 'road-center-marks'; laneMarks.castShadow = false; laneMarks.receiveShadow = false;
     for (let i = 0; i < 7; i++) {
-      const mark = new THREE.Mesh(new THREE.PlaneGeometry(.12, 3.15), paintMat);
-      mark.rotation.x = -Math.PI / 2; mark.position.set(0, -.018, -SEGMENT_LENGTH / 2 + 4 + i * 8); group.add(mark);
+      dummy.position.set(0, -.018, -SEGMENT_LENGTH / 2 + 4 + i * 8);
+      dummy.rotation.set(-Math.PI / 2, 0, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix();
+      laneMarks.setMatrixAt(i, dummy.matrix);
     }
+    laneMarks.instanceMatrix.needsUpdate = true; group.add(laneMarks);
+
+    const paintedEdges = new THREE.InstancedMesh(markings.edgeGeometry, markings.edgePaint, 4);
+    const curbEdges = new THREE.InstancedMesh(markings.edgeGeometry, markings.edgeCurb, 2);
+    paintedEdges.name = 'road-painted-edges'; curbEdges.name = 'road-curb-edges';
+    paintedEdges.castShadow = false; paintedEdges.receiveShadow = false;
+    curbEdges.castShadow = false; curbEdges.receiveShadow = false;
+    let paintedIndex = 0; let curbIndex = 0;
     for (const x of [-8.58, 8.58]) {
       for (let i = 0; i < 3; i++) {
-        const edge = new THREE.Mesh(new THREE.BoxGeometry(.085, .013, 7.4), i % 2 ? curbMat : paintMat);
-        edge.position.set(x, -.01, -SEGMENT_LENGTH / 2 + 7 + i * 17); group.add(edge);
+        dummy.position.set(x, -.01, -SEGMENT_LENGTH / 2 + 7 + i * 17);
+        dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix();
+        if (i % 2) curbEdges.setMatrixAt(curbIndex++, dummy.matrix);
+        else paintedEdges.setMatrixAt(paintedIndex++, dummy.matrix);
       }
     }
+    paintedEdges.instanceMatrix.needsUpdate = true; curbEdges.instanceMatrix.needsUpdate = true;
+    group.add(paintedEdges, curbEdges);
     const decor = new THREE.Group(); group.add(decor);
     this.populateDecor(decor);
     this.world.add(group);
@@ -430,11 +440,23 @@ class Cart {
       this.wheels.push(wheelGroup); this.group.add(wheelGroup);
     }
   }
+  removeProceduralCart() {
+    for (const part of [this.proceduralBasket, this.proceduralFrame, this.proceduralNose]) {
+      if (!part) continue;
+      part.parent?.remove(part); disposeObject(part);
+    }
+    for (const wheel of this.wheels) { this.group.remove(wheel); disposeObject(wheel); }
+    this.wheels.length = 0;
+  }
+  removeProceduralRider() {
+    for (const part of this.proceduralRiderParts) { this.rider.remove(part); disposeObject(part); }
+    this.proceduralRiderParts.length = 0;
+  }
   buildRider() {
     const riderPivot = new THREE.Group(); riderPivot.position.set(0, this.handleY, this.handleZ); this.reaction.add(riderPivot);
     const rider = new THREE.Group();
-    rider.position.set(0, -this.handleY, -this.handleZ);
-    rider.rotation.set(0, 0, 0);
+    rider.position.set(.16, .10 - this.handleY, 2.42 - this.handleZ);
+    rider.rotation.x = -.68;
     rider.scale.setScalar(1.08);
     riderPivot.add(rider);
 
@@ -447,183 +469,75 @@ class Cart {
     const helmetRed = material(0xc72f45, .4, .08);
     const visor = material(0x18364a, .24, .18);
 
-    const makeSegment = (radius, mat) => {
-      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 9), mat);
-      mesh.userData.riderSegmentDirection = new THREE.Vector3();
-      rider.add(mesh); return mesh;
-    };
-    const makeJoint = (radius, mat) => {
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 8), mat);
-      rider.add(mesh); return mesh;
-    };
-
-    // Torso pivots at the hips so the upper body can lag behind the cart.
-    const torsoJoint = new THREE.Group(); torsoJoint.position.set(0, 1.10, 1.58); rider.add(torsoJoint);
+    // Narrow rounded torso, with a colored back panel visible from the chase camera.
     const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.215, .30, 5, 12), jersey);
-    torso.scale.set(1, 1, .82); torso.position.set(0, .22, -.005); torso.rotation.x = .12; torsoJoint.add(torso);
+    torso.scale.set(1, 1, .82); torso.position.set(0, .56, .015); torso.rotation.x = .12; rider.add(torso);
     const backPanel = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), jerseyTrim);
-    backPanel.scale.set(.13, .22, .035); backPanel.position.set(0, .23, .174); torsoJoint.add(backPanel);
+    backPanel.scale.set(.13, .22, .035); backPanel.position.set(0, .57, .194); rider.add(backPanel);
     const belt = new THREE.Mesh(new THREE.TorusGeometry(.175, .026, 6, 14), material(0x203b4c, .78));
-    belt.position.set(0, 0, 0); belt.rotation.x = Math.PI / 2; torsoJoint.add(belt);
+    belt.position.set(0, .34, .02); belt.rotation.x = Math.PI / 2; rider.add(belt);
 
-    const headJoint = new THREE.Group(); headJoint.position.set(0, .55, -.055); torsoJoint.add(headJoint);
     const neck = new THREE.Mesh(new THREE.CapsuleGeometry(.085, .10, 3, 8), skin);
-    neck.position.set(0, -.01, .02); neck.rotation.x = -.16; headJoint.add(neck);
+    neck.position.set(0, .88, -.035); neck.rotation.x = -.16; rider.add(neck);
     const head = new THREE.Mesh(new THREE.SphereGeometry(.205, 14, 10), skin);
-    head.position.set(0, .155, -.05); headJoint.add(head);
+    head.position.set(0, 1.045, -.105); rider.add(head);
     const helmet = new THREE.Mesh(new THREE.SphereGeometry(.255, 16, 12), helmetShell);
-    helmet.scale.set(1, .88, 1.08); helmet.position.set(0, .215, -.055); headJoint.add(helmet);
+    helmet.scale.set(1, .88, 1.08); helmet.position.set(0, 1.105, -.11); rider.add(helmet);
     const helmetCrown = new THREE.Mesh(new THREE.SphereGeometry(.262, 14, 8, 0, Math.PI * 2, 0, Math.PI * .40), helmetRed);
-    helmetCrown.scale.set(1, .72, 1.04); helmetCrown.position.set(0, .24, -.05); headJoint.add(helmetCrown);
+    helmetCrown.scale.set(1, .72, 1.04); helmetCrown.position.set(0, 1.13, -.105); rider.add(helmetCrown);
     const helmetBand = new THREE.Mesh(new THREE.TorusGeometry(.226, .025, 6, 20), helmetRed);
-    helmetBand.position.set(0, .205, -.055); helmetBand.rotation.x = Math.PI / 2 - .12; headJoint.add(helmetBand);
+    helmetBand.position.set(0, 1.095, -.11); helmetBand.rotation.x = Math.PI / 2 - .12; rider.add(helmetBand);
     const helmetVisor = new THREE.Mesh(new THREE.SphereGeometry(.19, 12, 7, 0, Math.PI, 0, Math.PI * .42), visor);
-    helmetVisor.scale.set(1, .8, .42); helmetVisor.position.set(0, .175, -.248); helmetVisor.rotation.x = -.18; headJoint.add(helmetVisor);
+    helmetVisor.scale.set(1, .8, .42); helmetVisor.position.set(0, 1.065, -.303); helmetVisor.rotation.x = -.18; rider.add(helmetVisor);
 
-    const arms = [];
-    const legs = [];
     for (const side of [-1, 1]) {
-      const hipLocal = new THREE.Vector3(side * .12, 0, .01);
-      const kneeStart = new THREE.Vector3(side * .17, .61, 1.82);
-      const ankleStart = new THREE.Vector3(side * .18, .14, 1.75);
-      const kneeJoint = makeJoint(.105, pants); const ankleJoint = makeJoint(.078, pants);
-      const boot = new THREE.Mesh(new THREE.CapsuleGeometry(.073, .15, 4, 8), shoe); rider.add(boot);
-      legs.push({
-        side, hipLocal, upper: makeSegment(.105, pants), lower: makeSegment(.078, pants),
-        kneeJoint, ankleJoint, boot, knee: softPoint(kneeStart), ankle: softPoint(ankleStart),
-        kneeStart, ankleStart, hipPoint: new THREE.Vector3(), kneeTarget: new THREE.Vector3(),
-        ankleTarget: new THREE.Vector3(), kneeOffset: new THREE.Vector3(), ankleOffset: new THREE.Vector3(),
-        footDirection: new THREE.Vector3(),
-      });
+      const hip = new THREE.Vector3(side * .12, .34, .02);
+      const knee = new THREE.Vector3(side * .17, .25, .34);
+      const ankle = new THREE.Vector3(side * .18, .15, .18);
+      rodBetween(rider, hip, knee, .105, pants, 9);
+      rodBetween(rider, knee, ankle, .078, pants, 9);
+      const shoeMesh = new THREE.Mesh(new THREE.CapsuleGeometry(.073, .15, 4, 8), shoe);
+      shoeMesh.position.set(side * .18, .12, .12); shoeMesh.rotation.x = Math.PI / 2; rider.add(shoeMesh);
 
-      const shoulder = new THREE.Vector3(side * .19, .44, -.015);
+      const shoulder = new THREE.Vector3(side * .19, .78, .005);
+      const elbow = new THREE.Vector3(side * .34, .91, -.13);
+      const handPoint = new THREE.Vector3(side * .46, 1.02, -.34);
       const shoulderCap = new THREE.Mesh(new THREE.SphereGeometry(.115, 10, 8), jersey);
-      shoulderCap.position.copy(shoulder); torsoJoint.add(shoulderCap);
-      const elbowStart = new THREE.Vector3(side * .34, 1.35, 1.39);
-      const wrist = makeJoint(.058, skin); const glove = makeJoint(.073, jerseyTrim);
-      glove.scale.set(1, .78, 1.16);
-      arms.push({
-        side, shoulderLocal: shoulder, upper: makeSegment(.082, jersey), lower: makeSegment(.053, skin),
-        elbowJoint: makeJoint(.079, jersey), elbow: softPoint(elbowStart), elbowStart, wrist, glove,
-        shoulderPoint: new THREE.Vector3(), gripPoint: new THREE.Vector3(), elbowTarget: new THREE.Vector3(),
-      });
+      shoulderCap.position.copy(shoulder); rider.add(shoulderCap);
+      rodBetween(rider, shoulder, elbow, .082, jersey, 9);
+      rodBetween(rider, elbow, handPoint, .053, skin, 9);
+      const wrist = new THREE.Mesh(new THREE.SphereGeometry(.062, 9, 7), skin);
+      wrist.position.copy(handPoint); rider.add(wrist);
+      const glove = new THREE.Mesh(new THREE.SphereGeometry(.068, 9, 7), jerseyTrim);
+      glove.scale.set(1, .72, 1.1); glove.position.copy(handPoint).add(new THREE.Vector3(0, -.01, -.055)); rider.add(glove);
     }
 
     const chestMark = new THREE.Mesh(new THREE.SphereGeometry(.12, 10, 7), helmetRed);
-    chestMark.scale.set(.56, .58, .22); chestMark.position.set(0, .28, -.198); torsoJoint.add(chestMark);
-    this.rider = rider;
+    chestMark.scale.set(.56, .58, .22); chestMark.position.set(0, .62, -.178); rider.add(chestMark);
+    this.rider = rider; this.riderJersey = jersey; this.riderHelmetAccent = helmetRed;
     this.riderPivot = riderPivot; this.riderBaseScale = rider.scale.clone();
-    this.riderPivotBasePosition = riderPivot.position.clone(); this.riderBaseRotation = rider.rotation.clone();
-    this.riderPose = {
-      torsoJoint, headJoint, arms, legs,
-      torsoPosition: softPoint(torsoJoint.position), headPosition: softPoint(headJoint.position),
-      torsoTarget: new THREE.Vector3(), headTarget: new THREE.Vector3(),
-      torsoAngles: [softAngle(), softAngle(), softAngle()],
-      headAngles: [softAngle(), softAngle(), softAngle()],
-    };
-  }
-  resetRiderPose() {
-    const pose = this.riderPose;
-    this.riderPivot.position.copy(this.riderPivotBasePosition); this.riderPivot.rotation.set(0, 0, 0);
-    this.rider.rotation.copy(this.riderBaseRotation); this.rider.scale.copy(this.riderBaseScale);
-    pose.torsoPosition.position.set(0, 1.10, 1.58); pose.torsoPosition.velocity.set(0, 0, 0);
-    pose.headPosition.position.set(0, .55, -.055); pose.headPosition.velocity.set(0, 0, 0);
-    pose.torsoJoint.position.copy(pose.torsoPosition.position); pose.torsoJoint.rotation.set(0, 0, 0);
-    pose.headJoint.position.copy(pose.headPosition.position); pose.headJoint.rotation.set(0, 0, 0);
-    for (const angles of [pose.torsoAngles, pose.headAngles]) {
-      for (const angle of angles) { angle.value = 0; angle.velocity = 0; }
-    }
-    for (const limb of [...pose.arms, ...pose.legs]) {
-      limb.elbow && (limb.elbow.position.copy(limb.elbowStart), limb.elbow.velocity.set(0, 0, 0));
-      limb.knee && (limb.knee.position.copy(limb.kneeStart), limb.knee.velocity.set(0, 0, 0));
-      limb.ankle && (limb.ankle.position.copy(limb.ankleStart), limb.ankle.velocity.set(0, 0, 0));
-    }
-    this.riderWobbleTime = 0;
+    this.riderPivotBasePosition = riderPivot.position.clone(); this.proceduralRiderParts = [...rider.children];
   }
   update(dt, speed, steer, bump, active) {
     this.wheels.forEach((wheel, i) => { wheel.rotation.x += dt * speed * 1.7; wheel.rotation.z = steer * (i < 2 ? -.05 : .05); });
     this.reaction.rotation.z = damp(this.reaction.rotation.z, -steer * .12 + bump, 8, dt);
     this.reaction.rotation.x = damp(this.reaction.rotation.x, active ? Math.min(.045, speed * .0007) : 0, 3, dt);
-    const step = Math.min(dt, .05);
-    this.riderWobbleTime += dt * (active ? 1.35 : .7);
-    const t = this.riderWobbleTime; const looseness = active ? 1 : .28;
-    const pose = this.riderPose;
-    const jolt = clamp(bump, -.9, .9);
-    const sway = clamp(-steer * .48 + jolt * 1.25, -.75, .75);
-
+    this.riderWobbleTime += dt * (active ? 1.2 : .75);
+    const t = this.riderWobbleTime; const looseness = active ? 1 : .42;
     this.riderPivot.position.copy(this.riderPivotBasePosition);
-    this.riderPivot.position.y += Math.sin(t * 6.4) * .008 * looseness;
-
-    const torsoTarget = pose.torsoTarget.set(
-      Math.sin(t * 4.1) * .018 * looseness - steer * .035,
-      1.10 + Math.sin(t * 8.2) * .012 * looseness + Math.max(0, jolt) * .025,
-      1.58 + Math.sin(t * 3.6 + .7) * .018 * looseness,
+    this.riderPivot.position.y += Math.sin(t * 6.4) * .018 * looseness;
+    this.riderPivot.rotation.set(
+      Math.sin(t * 5.4) * .17 * looseness + bump * .68,
+      Math.sin(t * 6.2 + .9) * .21 * looseness + steer * .045,
+      Math.sin(t * 4.2 + .4) * .15 * looseness + steer * .055 + bump * .22,
     );
-    stepSoftPoint(pose.torsoPosition, torsoTarget, step, 30, 6.8);
-    pose.torsoJoint.position.copy(pose.torsoPosition.position);
-    const torsoTargets = [
-      .04 + this.reaction.rotation.x * .8 + Math.sin(t * 4.8) * .035 * looseness + jolt * .42,
-      steer * .13 + Math.sin(t * 3.4) * .045 * looseness,
-      -steer * .31 + jolt * 1.18 + Math.sin(t * 3.8 + .4) * .045 * looseness,
-    ];
-    pose.torsoJoint.rotation.set(
-      stepSoftAngle(pose.torsoAngles[0], torsoTargets[0], step, 25, 5.4),
-      stepSoftAngle(pose.torsoAngles[1], torsoTargets[1], step, 25, 5.4),
-      stepSoftAngle(pose.torsoAngles[2], torsoTargets[2], step, 25, 5.4),
+    const squash = Math.sin(t * 8.1 + .6) * looseness;
+    this.rider.scale.set(
+      this.riderBaseScale.x * (1 - squash * .014),
+      this.riderBaseScale.y * (1 + squash * .026),
+      this.riderBaseScale.z * (1 - squash * .014),
     );
-
-    const headTarget = pose.headTarget.set(
-      0,
-      .55 + Math.sin(t * 5.4 + .5) * .012 * looseness,
-      -.055 + Math.sin(t * 4.3) * .02 * looseness,
-    );
-    stepSoftPoint(pose.headPosition, headTarget, step, 24, 5.2);
-    pose.headJoint.position.copy(pose.headPosition.position);
-    pose.headJoint.rotation.set(
-      stepSoftAngle(pose.headAngles[0], -pose.torsoAngles[0].value * .44 + Math.sin(t * 4.1 + 1) * .065 * looseness, step, 18, 4.4),
-      stepSoftAngle(pose.headAngles[1], -pose.torsoAngles[1].value * .5 + Math.sin(t * 3.2 + .7) * .07 * looseness, step, 18, 4.4),
-      stepSoftAngle(pose.headAngles[2], -pose.torsoAngles[2].value * .46 + Math.sin(t * 3.4 + .9) * .055 * looseness, step, 18, 4.4),
-    );
-
-    // Update matrices before solving each wrist back onto the handle bar.
-    this.group.updateMatrixWorld(true);
-    for (const arm of pose.arms) {
-      const shoulder = this.rider.worldToLocal(pose.torsoJoint.localToWorld(arm.shoulderPoint.copy(arm.shoulderLocal)));
-      const grip = this.rider.worldToLocal(this.reaction.localToWorld(arm.gripPoint.set(
-        arm.side * this.handleHalfWidth * .80, this.handleY + .015, this.handleZ + .025,
-      )));
-      const elbowTarget = arm.elbowTarget.copy(shoulder).lerp(grip, .48);
-      elbowTarget.x += arm.side * (.045 + sway * .055);
-      elbowTarget.y += .055 + Math.sin(t * 5 + arm.side) * .035 * looseness;
-      elbowTarget.z += .11 + Math.abs(jolt) * .08;
-      stepSoftPoint(arm.elbow, elbowTarget, step, 31, 6.4);
-      moveRiderSegment(arm.upper, shoulder, arm.elbow.position);
-      moveRiderSegment(arm.lower, arm.elbow.position, grip);
-      arm.elbowJoint.position.copy(arm.elbow.position);
-      arm.wrist.position.copy(grip);
-      arm.glove.position.set(grip.x, grip.y - .006, grip.z - .025);
-    }
-
-    for (const leg of pose.legs) {
-      const hip = this.rider.worldToLocal(pose.torsoJoint.localToWorld(leg.hipPoint.copy(leg.hipLocal)));
-      const phase = t * 5.1 + leg.side * .8;
-      const kneeTarget = leg.kneeTarget.copy(hip).add(leg.kneeOffset.set(
-        leg.side * (.045 + sway * .06), -.50 + Math.sin(phase) * .035 * looseness,
-        .22 + Math.sin(phase) * .04 * looseness + Math.abs(jolt) * .06,
-      ));
-      stepSoftPoint(leg.knee, kneeTarget, step, 27, 5.8);
-      const ankleTarget = leg.ankleTarget.copy(leg.knee.position).add(leg.ankleOffset.set(
-        leg.side * .018, -.45 + Math.sin(phase - .6) * .025 * looseness,
-        -.06 + Math.sin(phase - .6) * .035 * looseness,
-      ));
-      stepSoftPoint(leg.ankle, ankleTarget, step, 24, 5.4);
-      moveRiderSegment(leg.upper, hip, leg.knee.position);
-      moveRiderSegment(leg.lower, leg.knee.position, leg.ankle.position);
-      leg.kneeJoint.position.copy(leg.knee.position); leg.ankleJoint.position.copy(leg.ankle.position);
-      leg.boot.position.set(leg.ankle.position.x, leg.ankle.position.y - .015, leg.ankle.position.z + .07);
-      const footDirection = leg.footDirection.set(0, .035, .24 + Math.sin(phase) * .025 * looseness).normalize();
-      leg.boot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), footDirection);
-    }
+    if (this.updateRiderPose) this.updateRiderPose();
   }
 }
 
@@ -781,7 +695,7 @@ class ParticleSystem {
 class AssetManager {
   constructor(game) {
     this.game = game; this.loader = new GLTFLoader(); this.cartLoaded = true;
-    this.loadCart(); this.loadObstacleModels(); this.loadPickupModels();
+    this.loadCart(); this.loadRider(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadPickupModels() {
     const specs = [
@@ -855,8 +769,7 @@ class AssetManager {
       model.position.set(-center.x * scale, -.03 - bounds.min.y * scale, 1.29 - bounds.max.z * scale);
       model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       model.name = 'modelo-carro-supermarket'; this.game.cart.reaction.add(model);
-      this.game.cart.proceduralBasket.visible = false; this.game.cart.proceduralFrame.visible = false; this.game.cart.proceduralNose.visible = false;
-      for (const wheel of this.game.cart.wheels) wheel.visible = false;
+      this.game.cart.removeProceduralCart();
       this.game.cart.handleHalfWidth = size.x * scale * .47;
       this.game.cart.handleY = size.y * scale - .03;
       this.game.cart.handleZ = 1.29;
@@ -866,9 +779,126 @@ class AssetManager {
       this.game.cart.riderPivotBasePosition.copy(this.game.cart.riderPivot.position);
       this.game.setMultiplayerCartModel(model, size, scale);
       this.cartLoaded = true;
+      if (this.localRiderModel) this.poseRiderOnCart(this.localRiderModel, this.game.cart);
     }, undefined, (error) => console.warn('Modelo do carrinho indisponível; usando o modelo integrado.', error));
   }
 
+  loadRider() {
+    const url = new URL('./3DMODELS/stickmanFet.glb', import.meta.url).href;
+    this.loader.load(url, (gltf) => {
+      const model = gltf.scene; const bounds = new THREE.Box3().setFromObject(model); const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      const scale = 1.82 / (this.game.cart.rider.scale.y * size.y);
+      model.scale.setScalar(scale);
+      model.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+      model.rotation.y = Math.PI;
+      model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      model.name = 'modelo-stickmanFet-template';
+      this.riderModel = model;
+      const localModel = model.clone(true);
+      localModel.name = 'modelo-stickmanFet';
+      for (const part of this.game.cart.proceduralRiderParts) part.visible = false;
+      this.game.cart.rider.add(localModel);
+      this.localRiderModel = localModel;
+      this.game.cart.updateRiderPose = null;
+      this.poseRiderOnCart(localModel, this.game.cart);
+      this.game.cart.removeProceduralRider();
+      this.game.setMultiplayerRiderModel(model);
+      this.riderLoaded = true;
+    }, undefined, (error) => console.warn('Modelo do personagem indisponível; usando o personagem integrado.', error));
+  }
+  poseRiderOnCart(model, cart = this.game.cart) {
+    let pose = model.userData.cartPose;
+    if (!pose) {
+      pose = { meshes: [] };
+      model.traverse((object) => {
+        if (!object.isMesh || !object.geometry?.getAttribute('position')) return;
+        object.geometry = object.geometry.clone();
+        pose.meshes.push({
+          mesh: object,
+          source: object.geometry.getAttribute('position').array.slice(),
+        });
+      });
+      model.userData.cartPose = pose;
+    }
+
+    model.updateWorldMatrix(true, true); cart.group.updateMatrixWorld(true);
+    const vertexGroups = [];
+    const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+    for (const entry of pose.meshes) {
+      const { mesh, source } = entry;
+      const attribute = mesh.geometry.getAttribute('position');
+      attribute.array.set(source);
+      const meshToModel = modelInverse.clone().multiply(mesh.matrixWorld);
+      const modelToMesh = meshToModel.clone().invert();
+      const points = new Array(attribute.count);
+      for (let i = 0; i < attribute.count; i++) {
+        points[i] = new THREE.Vector3(source[i * 3], source[i * 3 + 1], source[i * 3 + 2]).applyMatrix4(meshToModel);
+      }
+      entry.attribute = attribute; entry.modelToMesh = modelToMesh; entry.points = points;
+      vertexGroups.push(...points.map((point, index) => ({ entry, point, index })));
+    }
+    if (!vertexGroups.length) return;
+
+    const bounds = new THREE.Box3(); vertexGroups.forEach(({ point }) => bounds.expandByPoint(point));
+    const size = bounds.getSize(new THREE.Vector3());
+    const halfWidth = Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x));
+    const height = Math.max(size.y, 1e-4);
+    const smoothstep = (edge0, edge1, value) => {
+      const t = clamp((value - edge0) / Math.max(edge1 - edge0, 1e-5), 0, 1);
+      return t * t * (3 - 2 * t);
+    };
+    const targets = [-1, 1].map((side) => {
+      const handX = clamp(cart.rider.position.x + side * .14, -cart.handleHalfWidth * .88, cart.handleHalfWidth * .88);
+      const world = cart.reaction.localToWorld(new THREE.Vector3(handX, cart.handleY + .02, cart.handleZ + .02));
+      return model.worldToLocal(world);
+    }).sort((a, b) => a.x - b.x);
+
+    for (const side of [-1, 1]) {
+      const shoulderVertices = vertexGroups.filter(({ point }) => {
+        const across = side * point.x;
+        return across > halfWidth * .15 && across < halfWidth * .36
+          && point.y > bounds.min.y + height * .49 && point.y < bounds.min.y + height * .74;
+      });
+      const handVertices = vertexGroups.filter(({ point }) => {
+        const across = side * point.x;
+        return across > halfWidth * .80
+          && point.y > bounds.min.y + height * .55 && point.y < bounds.min.y + height * .70;
+      });
+      if (!shoulderVertices.length || !handVertices.length) continue;
+
+      const average = (vertices) => vertices.reduce((sum, vertex) => sum.add(vertex.point), new THREE.Vector3()).multiplyScalar(1 / vertices.length);
+      const shoulder = average(shoulderVertices);
+      const hand = average(handVertices);
+      const target = targets.find((point) => side * point.x > 0) || targets[side > 0 ? 1 : 0];
+      const from = hand.clone().sub(shoulder);
+      const to = target.clone().sub(shoulder);
+      if (from.lengthSq() < 1e-8 || to.lengthSq() < 1e-8) continue;
+      const rotation = new THREE.Quaternion().setFromUnitVectors(from.clone().normalize(), to.clone().normalize());
+      const reachScale = clamp(to.length() / from.length(), .85, 1.18);
+
+      for (const vertex of vertexGroups) {
+        const { point, entry, index } = vertex;
+        const along = side * (point.x - shoulder.x);
+        if (along <= 0 || point.y < bounds.min.y + height * .43 || point.y > bounds.min.y + height * .78) continue;
+        const armWeight = smoothstep(.015, from.length() * .42, along);
+        const heightWeight = smoothstep(bounds.min.y + height * .43, bounds.min.y + height * .56, point.y)
+          * (1 - smoothstep(bounds.min.y + height * .71, bounds.min.y + height * .78, point.y));
+        const weight = armWeight * heightWeight;
+        if (weight < .001) continue;
+
+        const moved = point.clone().sub(shoulder).applyQuaternion(rotation).multiplyScalar(reachScale).add(shoulder);
+        moved.lerp(point, 1 - weight).applyMatrix4(entry.modelToMesh);
+        entry.attribute.setXYZ(index, moved.x, moved.y, moved.z);
+      }
+    }
+
+    for (const { mesh } of pose.meshes) {
+      mesh.geometry.getAttribute('position').needsUpdate = true;
+      mesh.geometry.computeVertexNormals();
+      mesh.geometry.computeBoundingBox(); mesh.geometry.computeBoundingSphere();
+    }
+  }
 }
 
 class Game {
@@ -876,6 +906,7 @@ class Game {
     this.phase = 'menu'; this.time = 0; this.distance = 0; this.score = 0; this.coinsCollected = 0; this.dodges = 0; this.hits = 0;
     this.maxSpeed = 0; this.speed = 15; this.targetSpeed = 15; this.health = MAX_COLLISIONS; this.combo = 1;
     this.comboTimer = 0; this.playerX = 0; this.steerVelocity = 0; this.lastSteer = 0;
+    this.uiUpdateTimer = 0; this.visualUpdateTimer = 0;
     this.key = { left: false, right: false, down: false };
     this.mouseSteer = null; this.pointerDown = false; this.mobileSteer = 0;
     this.powerup = null; this.powerTimer = 0; this.invulnerable = 0; this.impact = 0; this.impactVelocity = 0;
@@ -891,6 +922,7 @@ class Game {
     };
     this.remoteCarts = new Map();
     this.multiplayerCartModel = null;
+    this.multiplayerRiderModel = null;
     this.audio = new AudioManager();
     this.setupThree();
     this.makeWorld();
@@ -924,11 +956,11 @@ class Game {
       document.body.innerHTML = '<div style="padding:40px;font:16px sans-serif;color:#193b37">Este passeio precisa de WebGL. Ative a aceleração de hardware do navegador e abra novamente.</div>';
       throw error;
     }
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.35));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1));
     this.renderer.setSize(innerWidth, innerHeight, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.13;
-    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.scene.add(new THREE.HemisphereLight(0xdaf1ff, 0x526c81, 2.15));
     const sun = new THREE.DirectionalLight(0xf0f8ff, 2.8); sun.position.set(-15, 26, 15); sun.castShadow = true;
     sun.shadow.mapSize.set(512, 512); sun.shadow.camera.left = -18; sun.shadow.camera.right = 18; sun.shadow.camera.top = 24; sun.shadow.camera.bottom = -14;
@@ -959,13 +991,18 @@ class Game {
   makeAmbientObjects() {
     this.clouds = [];
     const cloudMat = material(0xf8fcff, 1, 0, 0, true);
+    const cloudGeometry = new THREE.IcosahedronGeometry(1, 1);
+    const puffTransform = new THREE.Object3D();
     for (let i = 0; i < 12; i++) {
-      const cloud = new THREE.Group();
       const count = 5 + Math.floor(Math.random() * 4);
+      const cloud = new THREE.InstancedMesh(cloudGeometry, cloudMat, count);
+      cloud.castShadow = false; cloud.receiveShadow = false;
       for (let j = 0; j < count; j++) {
-        const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(random(1.35, 2.9), 1), cloudMat);
-        puff.position.set((j - count / 2) * 2.15, random(-.55, .75), random(-1.2, 1.2)); cloud.add(puff);
+        puffTransform.position.set((j - count / 2) * 2.15, random(-.55, .75), random(-1.2, 1.2));
+        puffTransform.rotation.set(0, 0, 0); puffTransform.scale.setScalar(random(1.35, 2.9));
+        puffTransform.updateMatrix(); cloud.setMatrixAt(j, puffTransform.matrix);
       }
+      cloud.instanceMatrix.needsUpdate = true;
       cloud.position.set(random(-75, 75), random(24, 47), -random(35, 250)); this.scene.add(cloud); this.clouds.push(cloud);
     }
   }
@@ -1039,6 +1076,7 @@ class Game {
   start() {
     this.audio.unlock(); this.audio.play('click');
     trackFirebaseEvent('game_start');
+    this.uiUpdateTimer = 0; this.visualUpdateTimer = 0;
     clearTimeout(this.toastTimeout); ui.toast.classList.remove('is-visible'); ui.toast.textContent = '';
     this.phase = 'playing'; this.time = 0; this.distance = 0; this.score = 0; this.coinsCollected = 0; this.dodges = 0; this.hits = 0; this.maxSpeed = 0;
     ui.coins.textContent = '0';
@@ -1051,7 +1089,9 @@ class Game {
     this.track.segments.forEach((segment, i) => {
       const z = SEGMENT_LENGTH / 2 - SEGMENT_LENGTH * i; segment.group.position.set(0, slope * z, z); segment.group.rotation.x = -Math.asin(slope);
     });
-    this.cart.group.position.set(0, .11, 0); this.cart.reaction.rotation.set(0, 0, 0); this.cart.resetRiderPose();
+    this.cart.group.position.set(0, .11, 0); this.cart.reaction.rotation.set(0, 0, 0); this.cart.rider.rotation.set(-.8, 0, 0);
+    this.cart.riderPivot.rotation.set(0, 0, 0); this.cart.riderPivot.position.copy(this.cart.riderPivotBasePosition);
+    this.cart.rider.scale.copy(this.cart.riderBaseScale); this.cart.riderWobbleTime = 0;
     this.camera.position.set(0, 6, 10.7); this.cameraController.shake = 0;
     ui.menu.classList.add('is-hidden'); ui.gameover.classList.add('is-hidden'); ui.hud.classList.add('is-visible'); ui.sideRecord.classList.add('is-hidden');
     ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.add('is-hidden'); ui.mpResult.classList.add('is-hidden'); ui.mpScore.classList.add('is-hidden');
@@ -1349,8 +1389,7 @@ class Game {
   installMultiplayerCartModel(cart) {
     if (!this.multiplayerCartModel || cart.group.userData.hasMultiplayerCartModel) return;
     const { model, size, scale } = this.multiplayerCartModel;
-    cart.proceduralBasket.visible = false; cart.proceduralFrame.visible = false; cart.proceduralNose.visible = false;
-    for (const wheel of cart.wheels) wheel.visible = false;
+    cart.removeProceduralCart();
     cart.handleHalfWidth = size.x * scale * .47;
     cart.handleY = size.y * scale - .03;
     cart.handleZ = 1.29;
@@ -1360,8 +1399,28 @@ class Game {
     cart.riderPivotBasePosition.copy(cart.riderPivot.position);
     const clone = model.clone(true);
     clone.name = 'modelo-carro-multiplayer';
+    clone.traverse((object) => {
+      if (object.isMesh) { object.castShadow = false; object.receiveShadow = false; }
+    });
     cart.reaction.add(clone);
     cart.group.userData.hasMultiplayerCartModel = true;
+  }
+  setMultiplayerRiderModel(model) {
+    this.multiplayerRiderModel = model;
+    for (const cart of this.remoteCarts.values()) this.installMultiplayerRiderModel(cart);
+  }
+  installMultiplayerRiderModel(cart) {
+    if (!this.multiplayerRiderModel || cart.group.userData.hasMultiplayerRiderModel) return;
+    for (const part of cart.proceduralRiderParts) part.visible = false;
+    const rider = this.multiplayerRiderModel.clone(true);
+    rider.name = 'modelo-personagem-multiplayer';
+    rider.traverse((object) => {
+      if (object.isMesh) { object.castShadow = false; object.receiveShadow = false; }
+    });
+    cart.rider.add(rider);
+    this.assets.poseRiderOnCart(rider, cart);
+    cart.removeProceduralRider();
+    cart.group.userData.hasMultiplayerRiderModel = true;
   }
   startMultiplayer() {
     if (this.phase === 'mp-playing') return;
@@ -1565,16 +1624,22 @@ class Game {
       this.dustTimer = .17;
       for (const side of [-.94, .94]) this.particles.burst(new THREE.Vector3(this.playerX + side, .18, .91), 0xbfe7fb, 1, true);
     }
-    const wind = clamp((this.speed * 2.45 - 42) / 54, 0, 1);
-    gameRoot.style.setProperty('--rush', wind.toFixed(3));
-    gameRoot.style.setProperty('--wind-duration', `${lerp(1.15, .27, wind).toFixed(2)}s`);
+    this.visualUpdateTimer -= dt;
+    if (this.visualUpdateTimer <= 0) {
+      this.visualUpdateTimer = .05;
+      const wind = clamp((this.speed * 2.45 - 42) / 54, 0, 1);
+      gameRoot.style.setProperty('--rush', wind.toFixed(3));
+      gameRoot.style.setProperty('--wind-duration', `${lerp(1.15, .27, wind).toFixed(2)}s`);
+    }
     this.invulnerable = Math.max(0, this.invulnerable - dt);
     if (this.comboTimer > 0) { this.comboTimer -= dt; if (this.comboTimer <= 0) this.combo = 1; }
     if (this.powerup) { this.powerTimer -= dt; if (this.powerTimer <= 0) this.clearPower(); }
     this.updateClouds(dt);
     this.cameraController.update(dt, this.speed, true);
     this.audio.setMotion(this.speed, true);
-    this.showDistanceJokes(); this.updateUI();
+    this.showDistanceJokes();
+    this.uiUpdateTimer -= dt;
+    if (this.uiUpdateTimer <= 0) { this.uiUpdateTimer = .1; this.updateUI(); }
     if (this.phase === 'mp-playing') this.updateMultiplayer(dt);
     if (this.health <= 0) this.endRun();
   }
@@ -1646,11 +1711,15 @@ class Game {
   }
   resize() {
     if (!this.renderer) return; this.camera.aspect = innerWidth / innerHeight;
-    this.camera.updateProjectionMatrix(); this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.35)); this.renderer.setSize(innerWidth, innerHeight, false);
+    this.camera.updateProjectionMatrix(); this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1)); this.renderer.setSize(innerWidth, innerHeight, false);
   }
   loop(now) {
     const dt = Math.min(.04, Math.max(0, (now - this.lastFrame) / 1000)); this.lastFrame = now;
-    if ((this.phase === 'playing' || this.phase === 'mp-playing') && document.visibilityState !== 'hidden') this.update(dt);
+    if (document.visibilityState === 'hidden') {
+      requestAnimationFrame((t) => this.loop(t));
+      return;
+    }
+    if (this.phase === 'playing' || this.phase === 'mp-playing') this.update(dt);
     else {
       const idleDt = Math.min(dt, .04); this.time += idleDt;
       const idleSpeed = this.phase === 'menu' ? 4.6 : 0;
