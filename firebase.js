@@ -5,10 +5,13 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   getFirestore,
+  onSnapshot,
   runTransaction,
   serverTimestamp,
   setDoc,
+  writeBatch,
 } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -117,6 +120,136 @@ export async function saveFirebaseRun(run) {
   } catch (error) {
     console.warn('Não foi possível sincronizar esta partida com o Firestore.', error);
     return null;
+  }
+}
+
+const ROOM_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+function generateRoomCode() {
+  let code = '';
+  for (let i = 0; i < 6; i++) code += ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)];
+  return code;
+}
+
+function multiplayerPlayerId() {
+  const storageKey = 'carrinho-multiplayer-id';
+  try {
+    let id = sessionStorage.getItem(storageKey);
+    if (!id) {
+      id = globalThis.crypto?.randomUUID?.() || `p${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+      sessionStorage.setItem(storageKey, id);
+    }
+    return id;
+  } catch {
+    return globalThis.crypto?.randomUUID?.() || `p${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  }
+}
+
+function initialRoomPlayer() {
+  return {
+    ready: true, x: 0, distance: 0, speed: 0, score: 0,
+    alive: true, ping: serverTimestamp(),
+  };
+}
+
+export async function createMultiplayerRoom() {
+  const playerId = multiplayerPlayerId();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateRoomCode();
+    const roomRef = doc(db, 'rooms', code);
+    const created = await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(roomRef);
+      if (snapshot.exists()) return false;
+      transaction.set(roomRef, {
+        createdAt: serverTimestamp(), status: 'waiting', hostId: playerId,
+        playerIds: [playerId], winner: null, rematch: {},
+      });
+      transaction.set(doc(db, 'rooms', code, 'players', playerId), initialRoomPlayer());
+      return true;
+    });
+    if (created) return { code, playerId, role: 'host' };
+  }
+  throw new Error('unavailable');
+}
+
+export async function joinMultiplayerRoom(rawCode) {
+  const playerId = multiplayerPlayerId();
+  const code = String(rawCode || '').trim().toUpperCase();
+  if (code.length !== 6) throw new Error('not-found');
+  const roomRef = doc(db, 'rooms', code);
+  const playerRef = doc(db, 'rooms', code, 'players', playerId);
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists()) throw new Error('not-found');
+    const room = snapshot.data();
+    const playerIds = Array.isArray(room.playerIds) ? room.playerIds : [];
+    const isReturningPlayer = playerIds.includes(playerId);
+    if (room.status !== 'waiting') throw new Error('unavailable');
+    if (!isReturningPlayer && playerIds.length >= 6) throw new Error('full');
+    if (!isReturningPlayer) {
+      transaction.update(roomRef, { playerIds: [...playerIds, playerId], rematch: {} });
+      transaction.set(playerRef, initialRoomPlayer());
+    }
+    return { code, playerId, role: room.hostId === playerId ? 'host' : 'guest', status: room.status };
+  });
+}
+
+export function listenMultiplayerRoom(code, callback) {
+  let room = null;
+  let players = [];
+  let roomReady = false;
+  let playersReady = false;
+  const publish = () => { if (roomReady && playersReady) callback(room, players); };
+  const unsubscribeRoom = onSnapshot(doc(db, 'rooms', code), (snapshot) => {
+    room = snapshot.exists() ? snapshot.data() : null;
+    roomReady = true;
+    publish();
+  }, () => callback(null, []));
+  const unsubscribePlayers = onSnapshot(collection(db, 'rooms', code, 'players'), (snapshot) => {
+    players = snapshot.docs.map((player) => ({ id: player.id, ...player.data() }));
+    playersReady = true;
+    publish();
+  }, () => callback(null, []));
+  return () => { unsubscribeRoom(); unsubscribePlayers(); };
+}
+
+export async function updateMultiplayerPlayer(code, playerId, state) {
+  try {
+    await setDoc(doc(db, 'rooms', code, 'players', playerId), { ...state, ping: serverTimestamp() }, { merge: true });
+  } catch (error) {
+    console.debug('Sincronização multiplayer ignorada.', error);
+  }
+}
+
+export async function updateMultiplayerRoom(code, fields) {
+  try {
+    await setDoc(doc(db, 'rooms', code), fields, { merge: true });
+  } catch (error) {
+    console.debug('Atualização da sala ignorada.', error);
+  }
+}
+
+export async function leaveMultiplayerRoom(code, role, participantId = multiplayerPlayerId()) {
+  try {
+    const roomRef = doc(db, 'rooms', code);
+    if (role === 'host') {
+      const playerSnapshot = await getDocs(collection(db, 'rooms', code, 'players'));
+      const batch = writeBatch(db);
+      playerSnapshot.docs.forEach((player) => batch.delete(player.ref));
+      batch.delete(roomRef);
+      await batch.commit();
+      return;
+    }
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(roomRef);
+      if (!snapshot.exists()) return;
+      const room = snapshot.data();
+      const playerIds = (room.playerIds || []).filter((id) => id !== participantId);
+      transaction.update(roomRef, { playerIds, rematch: {} });
+      if (room.status !== 'finished') transaction.delete(doc(db, 'rooms', code, 'players', participantId));
+    });
+  } catch (error) {
+    console.debug('Saída da sala ignorada.', error);
   }
 }
 

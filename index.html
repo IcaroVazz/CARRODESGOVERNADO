@@ -57,6 +57,9 @@
         <div class="combo-badge" id="combo-badge"><span>SEQUÊNCIA</span><strong>COMBO <b id="combo">x1</b></strong></div>
         <div class="powerup-badge" id="powerup-badge"><span id="powerup-icon">✦</span><strong id="powerup-name">TURBO</strong><small id="powerup-time">3.0 s</small></div>
         <div class="toast" id="toast" role="status"></div>
+        <div class="mp-score glass-panel is-hidden" id="mp-score" aria-label="Placar da corrida multiplayer">
+          <div class="mp-score-players" id="mp-score-players"></div>
+        </div>
       </section>
 
       <aside class="distance-card glass-panel is-hidden" id="side-record"><span>RECORDE DA LADEIRA</span><strong><span id="best-distance">0</span><small>m</small></strong><i>feito em casa, com orgulho</i></aside>
@@ -66,7 +69,6 @@
         <button class="steer-button" id="steer-left" type="button" aria-label="Virar à esquerda"><span>←</span><small>ESQUERDA</small></button>
         <button class="steer-button" id="steer-right" type="button" aria-label="Virar à direita"><span>→</span><small>DIREITA</small></button>
       </div>
-      <div class="drift-indicator" id="drift-indicator">FREIO DE MÃO PUXADO</div>
 
       <section class="overlay menu-overlay" id="menu-overlay">
         <div class="menu-layout">
@@ -75,11 +77,12 @@
             <h1>CARRINHO<br />DE SUPER<span class="title-accent">MERCADO</span><br /><span class="title-outline">DESGOVERNADO</span></h1>
             <p>Você, um carrinho com uma roda torta e uma ladeira que devia ter sido interditada.</p>
             <button class="primary-button" id="play-button" type="button"><span>JOGAR</span><b>↗</b></button>
+            <button class="primary-button mp-button" id="mp-button" type="button"><span>MULTIPLAYER</span><b>⇄</b></button>
             <div class="menu-score"><span>SEU MELHOR PASSEIO</span><strong><span id="menu-best">0</span> <small>metros</small></strong></div>
           </div>
           <div class="menu-aside">
             <div class="note-card"><span class="note-pin">✳</span><span class="eyebrow">AVISO DO MERCADO</span><p>Este carrinho não passou pela revisão.</p><span class="note-sign">— A gerência</span></div>
-            <div class="steering-guide"><span class="eyebrow">COMO CONTROLA</span><p><kbd>A</kbd> <kbd>D</kbd> ou setas <span>↔</span></p><small>A velocidade sobe com a pontuação · S reduz · Espaço derrapa</small></div>
+            <div class="steering-guide"><span class="eyebrow">COMO CONTROLA</span><p><kbd>A</kbd> <kbd>D</kbd> ou setas <span>↔</span></p><small>A velocidade sobe com a pontuação · S reduz</small></div>
           </div>
         </div>
         <div class="menu-footer"><span>UMA DESCIDA SEM RESPONSÁVEIS</span><span>REC · ∞</span></div>
@@ -100,6 +103,57 @@
           <div class="end-actions"><button class="primary-button" id="restart-button" type="button"><span>OUTRA VEZ</span><b>↗</b></button><button class="text-button" id="menu-button" type="button">VOLTAR AO MENU <span>↩</span></button></div>
         </div>
         <div class="gameover-stamp">REVISÃO<br />VENCIDA</div>
+      </section>
+
+      <section class="overlay mp-overlay is-hidden" id="mp-menu">
+        <div class="mp-card">
+          <span class="kicker"><i></i> ATÉ SEIS CARRINHOS, UMA LADEIRA</span>
+          <h2>MULTI<span>PLAYER</span></h2>
+          <div class="mp-actions">
+            <button class="primary-button" id="mp-create" type="button"><span>CRIAR SALA</span><b>＋</b></button>
+            <button class="primary-button" id="mp-join" type="button"><span>BUSCAR SERVIDOR</span><b>⌕</b></button>
+          </div>
+          <button class="text-button" id="mp-back" type="button">VOLTAR AO MENU <span>↩</span></button>
+        </div>
+      </section>
+
+      <section class="overlay mp-overlay is-hidden" id="mp-lobby">
+        <div class="mp-card">
+          <span class="kicker"><i></i> SALA MULTIPLAYER</span>
+          <div class="mp-code-block" id="mp-code-block">
+            <span class="eyebrow">CÓDIGO DA SALA</span>
+            <strong class="mp-code" id="mp-code">------</strong>
+            <small>Compartilhe o código com até cinco pessoas.</small>
+          </div>
+          <div class="mp-join-block is-hidden" id="mp-join-block">
+            <span class="eyebrow">INSIRA O CÓDIGO DA SALA</span>
+            <input id="mp-code-input" maxlength="6" placeholder="A7K92X" autocomplete="off" spellcheck="false" />
+            <button class="primary-button" id="mp-join-confirm" type="button"><span>ENTRAR</span><b>↗</b></button>
+          </div>
+          <p class="mp-status" id="mp-status">Aguardando participantes…</p>
+          <div class="mp-players" id="mp-lobby-players" aria-label="Participantes da sala">
+            <span>VAGA 1</span><span>VAGA 2</span><span>VAGA 3</span>
+            <span>VAGA 4</span><span>VAGA 5</span><span>VAGA 6</span>
+          </div>
+          <div class="end-actions">
+            <button class="primary-button is-hidden" id="mp-start" type="button"><span>INICIAR PARTIDA</span><b>↗</b></button>
+            <button class="text-button" id="mp-leave" type="button">SAIR DA SALA <span>↩</span></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="overlay gameover-overlay is-hidden" id="mp-result">
+        <div class="gameover-card">
+          <span class="kicker"><i></i> FIM DA DISPUTA</span>
+          <h2 id="mp-result-title">VITÓRIA!</h2>
+          <div class="mp-results" id="mp-results" aria-label="Resultado da corrida"></div>
+          <p class="new-record" id="mp-winner-line">🏆 A corrida terminou.</p>
+          <div class="end-actions">
+            <button class="primary-button" id="mp-rematch" type="button"><span>JOGAR NOVAMENTE</span><b>↗</b></button>
+            <button class="text-button" id="mp-exit" type="button">VOLTAR AO MENU <span>↩</span></button>
+          </div>
+          <p class="mp-status" id="mp-rematch-status"></p>
+        </div>
       </section>
 
       <footer class="bottomline"><span>DESCIDA Nº <b id="run-number">001</b></span><span id="bottom-tip">desvie. respire. repita.</span><span>FABRICADO SEM PLANO DE FUGA <b>✳</b></span></footer>

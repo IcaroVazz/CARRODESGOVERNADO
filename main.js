@@ -1,6 +1,16 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { loadFirebasePlayer, saveFirebaseRun, trackFirebaseEvent } from './firebase.js';
+import {
+  createMultiplayerRoom,
+  joinMultiplayerRoom,
+  leaveMultiplayerRoom,
+  listenMultiplayerRoom,
+  loadFirebasePlayer,
+  saveFirebaseRun,
+  trackFirebaseEvent,
+  updateMultiplayerPlayer,
+  updateMultiplayerRoom,
+} from './firebase.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = THREE.MathUtils.clamp;
@@ -36,9 +46,16 @@ const ui = {
   comboBadge: $('combo-badge'), combo: $('combo'), powerBadge: $('powerup-badge'),
   powerName: $('powerup-name'), powerTime: $('powerup-time'), powerIcon: $('powerup-icon'),
   toast: $('toast'), sideRecord: $('side-record'), hints: $('controls-hint'),
-  drift: $('drift-indicator'), finalDistance: $('final-distance'), finalScore: $('final-score'),
+  finalDistance: $('final-distance'), finalScore: $('final-score'),
   finalDodges: $('final-dodges'), finalHits: $('final-hits'), finalSpeed: $('final-speed'),
   newRecord: $('new-record'), run: $('run-number'), tip: $('bottom-tip'), bottomline: document.querySelector('.bottomline'), mobileControls: $('mobile-controls'),
+  mpButton: $('mp-button'), mpMenu: $('mp-menu'), mpCreate: $('mp-create'), mpJoin: $('mp-join'), mpBack: $('mp-back'),
+  mpLobby: $('mp-lobby'), mpCodeBlock: $('mp-code-block'), mpCode: $('mp-code'), mpJoinBlock: $('mp-join-block'),
+  mpCodeInput: $('mp-code-input'), mpJoinConfirm: $('mp-join-confirm'), mpStatus: $('mp-status'),
+  mpLobbyPlayers: $('mp-lobby-players'), mpStart: $('mp-start'), mpLeave: $('mp-leave'),
+  mpResult: $('mp-result'), mpResultTitle: $('mp-result-title'), mpResults: $('mp-results'),
+  mpWinnerLine: $('mp-winner-line'), mpRematch: $('mp-rematch'), mpExit: $('mp-exit'), mpRematchStatus: $('mp-rematch-status'),
+  mpScore: $('mp-score'), mpScorePlayers: $('mp-score-players'),
 };
 
 class AudioManager {
@@ -384,22 +401,29 @@ class Cart {
   buildRider() {
     const riderPivot = new THREE.Group(); riderPivot.position.set(0, this.handleY, this.handleZ); this.reaction.add(riderPivot);
     const rider = new THREE.Group(); rider.position.set(.22, .10 - this.handleY, 2.65 - this.handleZ); rider.rotation.x = -.8; rider.scale.setScalar(1.35); riderPivot.add(rider);
-    const skin = material(0xe9ad81, .85, 0, 0, true);
-    const sweatshirt = material(0x3379a8, .9, 0, 0, true);
-    const pants = material(0x29445e, .92, 0, 0, true);
+    const skin = material(0xd99a6c, .82, 0, 0, true);
+    const tankTop = material(0x14171c, .88, 0, 0, true);
+    const pants = material(0x1b1e24, .92, 0, 0, true);
     const shoe = material(0xf6fbff, .8, 0, 0, true);
-    const hair = material(0x49382f, .95, 0, 0, true);
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.33, .44, 4, 8), sweatshirt);
+    const helmetMat = material(0x101318, .32, .3, 0, true);
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.33, .44, 4, 8), tankTop);
     torso.position.set(0, .53, .02); torso.rotation.x = .18; rider.add(torso);
-    const jacketStripe = new THREE.Mesh(new THREE.BoxGeometry(.46, .055, .36), material(0xf0f8ff, .72, 0, 0, true));
-    jacketStripe.position.set(0, .45, -.035); jacketStripe.rotation.x = .16; rider.add(jacketStripe);
     const head = new THREE.Mesh(new THREE.SphereGeometry(.29, 12, 9), skin); head.position.set(0, 1.11, -.16); rider.add(head);
-    const hairCap = new THREE.Mesh(new THREE.SphereGeometry(.294, 10, 6, 0, Math.PI * 2, 0, Math.PI * .49), hair); hairCap.position.set(0, 1.15, -.155); rider.add(hairCap);
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(.34, 14, 10, 0, Math.PI * 2, 0, Math.PI * .64), helmetMat);
+    helmet.position.set(0, 1.14, -.13); helmet.rotation.x = -.22; rider.add(helmet);
+    const helmetBack = new THREE.Mesh(new THREE.SphereGeometry(.33, 12, 8, 0, Math.PI * 2, Math.PI * .5, Math.PI * .2), helmetMat);
+    helmetBack.position.set(0, 1.12, -.08); helmetBack.rotation.x = .5; rider.add(helmetBack);
+    const band = new THREE.Mesh(new THREE.TorusGeometry(.312, .042, 6, 18), material(0xc22730, .55, .05, 0, true));
+    band.position.set(0, 1.235, -.135); band.rotation.x = Math.PI / 2 - .3; rider.add(band);
+    const bandStripe = new THREE.Mesh(new THREE.TorusGeometry(.315, .016, 5, 18), material(0xf6fbff, .5, 0, 0, true));
+    bandStripe.position.set(0, 1.238, -.135); bandStripe.rotation.x = Math.PI / 2 - .3; rider.add(bandStripe);
+    const mouth = new THREE.Mesh(new THREE.SphereGeometry(.078, 8, 6), material(0x4a1a16, .7, 0, 0, true));
+    mouth.scale.set(1, 1.4, .55); mouth.position.set(0, .99, -.43); rider.add(mouth);
     const ear = new THREE.Mesh(new THREE.SphereGeometry(.06, 7, 6), skin);
     for (const side of [-1, 1]) { const e = ear.clone(); e.position.set(side * .275, 1.07, -.15); rider.add(e); }
     const eyesMat = material(0x273738, .6, 0, 0, true);
     for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(.027, 6, 6), eyesMat); eye.position.set(side * .09, 1.12, -.425); rider.add(eye);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(.03, 6, 6), eyesMat); eye.position.set(side * .095, 1.13, -.42); rider.add(eye);
       const hip = new THREE.Vector3(side * .18, .31, .02);
       const knee = side < 0 ? new THREE.Vector3(side * .20, .82, .10) : new THREE.Vector3(side * .20, .78, .20);
       const ankle = side < 0 ? new THREE.Vector3(side * .20, .67, .18) : new THREE.Vector3(side * .20, .67, .32);
@@ -409,10 +433,16 @@ class Cart {
       const shoulder = new THREE.Vector3(side * .25, 1, -.035);
       const elbow = new THREE.Vector3(side * .16, 1.12, -.07);
       const handPoint = new THREE.Vector3(side * .10, 1.26, -.13);
-      rodBetween(rider, shoulder, elbow, .071, sweatshirt, 8); rodBetween(rider, elbow, handPoint, .059, sweatshirt, 8);
+      rodBetween(rider, shoulder, elbow, .071, skin, 8); rodBetween(rider, elbow, handPoint, .059, skin, 8);
+      if (side === 1) {
+        const tattoo = new THREE.Mesh(new THREE.TorusGeometry(.078, .014, 5, 10), material(0x2f3a44, .8, 0, 0, true));
+        tattoo.position.copy(shoulder).lerp(elbow, .45);
+        tattoo.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), elbow.clone().sub(shoulder).normalize());
+        rider.add(tattoo);
+      }
       const hand = new THREE.Mesh(new THREE.SphereGeometry(.09, 8, 7), skin); hand.position.copy(handPoint); rider.add(hand);
     }
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(.18, .035, 6, 12), material(0xf0f8ff, .75, 0, 0, true));
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(.18, .03, 6, 12), tankTop);
     collar.position.set(0, .78, -.035); collar.rotation.x = Math.PI / 2; rider.add(collar);
     this.rider = rider; this.riderPivot = riderPivot; this.riderBaseScale = rider.scale.clone();
     this.riderPivotBasePosition = riderPivot.position.clone(); this.proceduralRiderParts = [...rider.children];
@@ -594,7 +624,7 @@ class ParticleSystem {
 class AssetManager {
   constructor(game) {
     this.game = game; this.loader = new GLTFLoader(); this.cartLoaded = true;
-    this.loadCart(); this.loadRider(); this.loadObstacleModels(); this.loadPickupModels();
+    this.loadCart(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadPickupModels() {
     const specs = [
@@ -799,13 +829,19 @@ class Game {
     this.phase = 'menu'; this.time = 0; this.distance = 0; this.score = 0; this.coinsCollected = 0; this.dodges = 0; this.hits = 0;
     this.maxSpeed = 0; this.speed = 15; this.targetSpeed = 15; this.health = MAX_COLLISIONS; this.combo = 1;
     this.comboTimer = 0; this.playerX = 0; this.steerVelocity = 0; this.lastSteer = 0;
-    this.key = { left: false, right: false, down: false, brake: false };
+    this.key = { left: false, right: false, down: false };
     this.mouseSteer = null; this.pointerDown = false; this.mobileSteer = 0;
     this.powerup = null; this.powerTimer = 0; this.invulnerable = 0; this.impact = 0; this.impactVelocity = 0;
     this.storyFlags = new Set(); this.toastTimeout = 0; this.dustTimer = 0;
     this.meterRecords = this.readStorage('carrinho-best-distance', 0);
     this.runCount = this.readStorage('carrinho-runs', 0);
     this.firebasePlayerId = null;
+    this.mp = {
+      code: null, role: null, playerId: null, hostId: null, playerIds: [], players: [], allPlayers: [], racePlayerIds: [],
+      unsubscribe: null, heartbeat: 0, syncTimer: 0, uiTimer: 0,
+      finished: false, resultsRequested: false, rematchStarting: false,
+    };
+    this.remoteCarts = new Map();
     this.audio = new AudioManager();
     this.setupThree();
     this.makeWorld();
@@ -885,10 +921,11 @@ class Game {
     }
   }
   setupControls() {
-    const keyMap = { KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', KeyS: 'down', ArrowDown: 'down', Space: 'brake' };
+    const keyMap = { KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', KeyS: 'down', ArrowDown: 'down' };
     window.addEventListener('keydown', (e) => {
       if (keyMap[e.code]) { e.preventDefault(); this.key[keyMap[e.code]] = true; }
-      if (e.code === 'Enter' && this.phase !== 'playing') this.start();
+      if (e.code === 'Enter' && (this.phase === 'menu' || this.phase === 'gameover')) this.start();
+      else if (e.code === 'Enter' && this.phase === 'mp-lobby' && !ui.mpJoinBlock.classList.contains('is-hidden')) this.confirmJoin();
     });
     window.addEventListener('keyup', (e) => { if (keyMap[e.code]) this.key[keyMap[e.code]] = false; });
     window.addEventListener('blur', () => {
@@ -915,6 +952,18 @@ class Game {
     bindSteer('steer-left', -1); bindSteer('steer-right', 1);
     ui.play.addEventListener('click', () => this.start()); ui.restart.addEventListener('click', () => this.start());
     ui.menuButton.addEventListener('click', () => this.toMenu());
+    ui.mpButton.addEventListener('click', () => { this.audio.unlock(); this.audio.play('click'); ui.menu.classList.add('is-hidden'); ui.mpMenu.classList.remove('is-hidden'); });
+    ui.mpBack.addEventListener('click', () => { this.audio.play('click'); ui.mpMenu.classList.add('is-hidden'); this.toMenu(); });
+    ui.mpCreate.addEventListener('click', () => this.hostRoom());
+    ui.mpJoin.addEventListener('click', () => { this.audio.play('click'); this.showLobby('join'); this.setMpStatus(''); });
+    ui.mpJoinConfirm.addEventListener('click', () => this.confirmJoin());
+    ui.mpStart.addEventListener('click', () => {
+      this.audio.play('click');
+      if (this.mp.code) updateMultiplayerRoom(this.mp.code, { status: 'playing', winner: null, rematch: null });
+    });
+    ui.mpLeave.addEventListener('click', () => this.leaveRoom());
+    ui.mpRematch.addEventListener('click', () => this.requestRematch());
+    ui.mpExit.addEventListener('click', () => this.leaveRoom());
     ui.sound.addEventListener('click', () => {
       this.audio.unlock(); this.audio.setEnabled(!this.audio.enabled);
       ui.soundState.textContent = this.audio.enabled ? 'ON' : 'OFF'; ui.soundIcon.textContent = this.audio.enabled ? '♫' : '♪';
@@ -949,6 +998,8 @@ class Game {
     this.cart.rider.scale.copy(this.cart.riderBaseScale); this.cart.riderWobbleTime = 0;
     this.camera.position.set(0, 6, 10.7); this.cameraController.shake = 0;
     ui.menu.classList.add('is-hidden'); ui.gameover.classList.add('is-hidden'); ui.hud.classList.add('is-visible'); ui.sideRecord.classList.add('is-hidden');
+    ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.add('is-hidden'); ui.mpResult.classList.add('is-hidden'); ui.mpScore.classList.add('is-hidden');
+    for (const cart of this.remoteCarts.values()) cart.group.visible = false;
     ui.hints.classList.remove('is-hidden'); ui.bottomline.classList.remove('is-hidden'); ui.mobileControls.classList.remove('is-hidden');
     ui.hints.style.opacity = ''; ui.run.textContent = String(this.runCount).padStart(3, '0');
     ui.phase.textContent = 'DESCIDA EM ANDAMENTO'; ui.comboBadge.classList.remove('is-active'); ui.powerBadge.classList.remove('is-active');
@@ -958,11 +1009,14 @@ class Game {
     this.phase = 'menu'; this.audio.setMotion(0, false);
     gameRoot.style.setProperty('--rush', '0');
     clearTimeout(this.toastTimeout); ui.toast.classList.remove('is-visible'); ui.toast.textContent = '';
+    ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.add('is-hidden'); ui.mpResult.classList.add('is-hidden'); ui.mpScore.classList.add('is-hidden');
+    for (const cart of this.remoteCarts.values()) cart.group.visible = false;
     ui.gameover.classList.add('is-hidden'); ui.menu.classList.remove('is-hidden'); ui.hud.classList.remove('is-visible');
     ui.hints.classList.add('is-hidden'); ui.bottomline.classList.add('is-hidden'); ui.mobileControls.classList.add('is-hidden');
     ui.sideRecord.classList.remove('is-hidden'); ui.phase.textContent = 'PRONTO PARA DESCER'; this.populateMenu();
   }
   endRun() {
+    if (this.phase === 'mp-playing') { this.finishMultiplayer('died'); return; }
     if (this.phase !== 'playing') return;
     this.phase = 'gameover'; this.audio.setMotion(0, false); this.audio.play('gameover');
     gameRoot.style.setProperty('--rush', '0');
@@ -992,15 +1046,297 @@ class Game {
     ui.sideRecord.classList.add('is-hidden'); this.populateMenu();
     ui.hints.classList.add('is-hidden'); ui.bottomline.classList.add('is-hidden'); ui.mobileControls.classList.add('is-hidden');
   }
+  setMpStatus(message) { ui.mpStatus.textContent = message; }
+  showLobby(mode) {
+    ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.remove('is-hidden');
+    ui.mpCodeBlock.classList.toggle('is-hidden', mode !== 'host');
+    ui.mpJoinBlock.classList.toggle('is-hidden', mode !== 'join');
+    ui.mpStart.classList.add('is-hidden');
+    [...ui.mpLobbyPlayers.children].forEach((slot, index) => {
+      slot.textContent = `VAGA ${index + 1}`;
+      slot.classList.add('is-empty');
+    });
+    this.phase = 'mp-lobby';
+    if (mode === 'join') setTimeout(() => ui.mpCodeInput.focus(), 80);
+  }
+  async hostRoom() {
+    this.audio.unlock(); this.audio.play('click');
+    this.showLobby('host'); ui.mpCode.textContent = '······';
+    this.setMpStatus('Criando sala…');
+    try {
+      const { code, role, playerId } = await createMultiplayerRoom();
+      this.mp.code = code; this.mp.role = role; this.mp.playerId = playerId;
+      ui.mpCode.textContent = code;
+      this.setMpStatus('Compartilhe o código e aguarde os participantes.');
+      this.listenRoom();
+      trackFirebaseEvent('mp_room_created');
+    } catch {
+      this.setMpStatus('Não foi possível criar a sala. Verifique a conexão e as regras do Firestore.');
+    }
+  }
+  async confirmJoin() {
+    const code = ui.mpCodeInput.value.trim().toUpperCase();
+    if (code.length !== 6) { this.setMpStatus('O código tem 6 caracteres.'); return; }
+    this.audio.unlock(); this.audio.play('click');
+    this.setMpStatus('Procurando sala…');
+    try {
+      const result = await joinMultiplayerRoom(code);
+      this.mp.code = result.code; this.mp.role = result.role; this.mp.playerId = result.playerId;
+      ui.mpJoinBlock.classList.add('is-hidden'); ui.mpCodeBlock.classList.remove('is-hidden');
+      ui.mpCode.textContent = result.code;
+      this.setMpStatus('Entrou na sala. Aguardando o host iniciar.');
+      this.listenRoom();
+      trackFirebaseEvent('mp_room_joined');
+    } catch (error) {
+      const messages = {
+        'not-found': 'Sala não encontrada. Confira o código.',
+        full: 'Esta sala já tem seis participantes.',
+        unavailable: 'A corrida já começou ou a sala foi encerrada.',
+      };
+      this.setMpStatus(messages[error.message] || 'Não foi possível entrar. Verifique a conexão e as regras do Firestore.');
+    }
+  }
+  listenRoom() {
+    this.mp.unsubscribe?.();
+    clearInterval(this.mp.heartbeat);
+    this.mp.unsubscribe = listenMultiplayerRoom(this.mp.code, (room, players) => this.onRoomUpdate(room, players));
+    this.mp.heartbeat = setInterval(() => {
+      if (this.mp.code && (this.phase === 'mp-lobby' || this.phase === 'mp-result')) {
+        void updateMultiplayerPlayer(this.mp.code, this.mp.playerId, this.mpPlayerState());
+      }
+    }, 2500);
+  }
+  orderedMpPlayers() {
+    const byId = new Map(this.mp.players.map((player) => [player.id, player]));
+    return this.mp.playerIds.map((id) => byId.get(id)).filter(Boolean);
+  }
+  renderLobbyPlayers() {
+    const players = this.orderedMpPlayers();
+    [...ui.mpLobbyPlayers.children].forEach((slot, index) => {
+      const player = players[index];
+      slot.textContent = player ? (player.id === this.mp.playerId ? `VOCÊ · J${index + 1}` : `JOGADOR ${index + 1}`) : `VAGA ${index + 1}`;
+      slot.classList.toggle('is-empty', !player);
+    });
+  }
+  playerIsConnected(player) {
+    const lastPing = player.ping?.toMillis?.();
+    return !lastPing || Date.now() - lastPing < 15000;
+  }
+  onRoomUpdate(room, players = []) {
+    if (!this.mp.code) return;
+    if (!room) {
+      if (this.phase === 'mp-playing') this.finishMultiplayer('disconnect', true);
+      else if (this.phase !== 'menu') { this.setMpStatus('A sala foi encerrada.'); this.leaveRoom(true); }
+      return;
+    }
+    this.mp.hostId = room.hostId;
+    this.mp.role = room.hostId === this.mp.playerId ? 'host' : 'guest';
+    this.mp.playerIds = Array.isArray(room.playerIds) ? room.playerIds : [];
+    this.mp.allPlayers = players;
+    this.mp.players = players.filter((player) => this.mp.playerIds.includes(player.id));
+    if (!this.mp.playerIds.includes(this.mp.playerId)) {
+      this.leaveRoom(true);
+      return;
+    }
+    if (this.phase === 'mp-lobby') {
+      this.renderLobbyPlayers();
+      const count = this.mp.playerIds.length;
+      ui.mpStart.classList.toggle('is-hidden', this.mp.role !== 'host' || count < 2);
+      this.setMpStatus(this.mp.role === 'host'
+        ? count < 2 ? 'Aguardando pelo menos mais um jogador.'
+          : `${count} de 6 participantes. ${count < 6 ? 'Podem começar ou aguardar mais jogadores.' : 'Sala completa; podem começar.'}`
+        : `${count} de 6 participantes. Aguardando o host iniciar.`);
+      if (room.status === 'playing') this.startMultiplayer();
+    } else if (this.phase === 'mp-playing') {
+      if (room.status === 'finished') this.showMultiplayerResult(room);
+    } else if (this.phase === 'mp-result') {
+      if (room.status === 'playing') { this.startMultiplayer(); return; }
+      const rematch = room.rematch || {};
+      const readyCount = this.mp.playerIds.filter((id) => rematch[id]).length;
+      ui.mpRematchStatus.textContent = readyCount > 0
+        ? `${readyCount} de ${this.mp.playerIds.length} prontos para outra corrida.` : '';
+      if (this.mp.role === 'host' && !this.mp.rematchStarting
+        && this.mp.playerIds.length >= 2 && this.mp.playerIds.every((id) => rematch[id])) {
+        this.mp.rematchStarting = true;
+        const reset = { ready: true, x: 0, distance: 0, speed: 0, score: 0, alive: true };
+        void Promise.all(this.mp.playerIds.map((id) => updateMultiplayerPlayer(this.mp.code, id, reset)))
+          .then(() => updateMultiplayerRoom(this.mp.code, { status: 'playing', winner: null, rematch: {} }))
+          .finally(() => { this.mp.rematchStarting = false; });
+      }
+    }
+    if (room.status === 'finished' && this.phase === 'mp-playing') this.showMultiplayerResult(room);
+  }
+  makeRemoteCart(playerId, seat) {
+    let cart = this.remoteCarts.get(playerId);
+    if (cart) return cart;
+    const colors = [COLORS.orange, COLORS.mint, COLORS.lilac, COLORS.yellow, COLORS.coral, COLORS.blue];
+    cart = new Cart();
+    cart.proceduralNose.material = material(colors[seat % colors.length], .44, .03);
+    cart.shadow.material = new THREE.MeshBasicMaterial({ color: 0x5a3226, transparent: true, opacity: .19, depthWrite: false });
+    this.scene.add(cart.group);
+    this.remoteCarts.set(playerId, cart);
+    return cart;
+  }
+  startMultiplayer() {
+    if (this.phase === 'mp-playing') return;
+    this.start();
+    this.phase = 'mp-playing';
+    this.mp.finished = false; this.mp.resultsRequested = false; this.mp.syncTimer = 0; this.mp.uiTimer = 0;
+    this.mp.racePlayerIds = [...this.mp.playerIds];
+    const seat = Math.max(0, this.mp.playerIds.indexOf(this.mp.playerId));
+    const startX = [-6.1, -3.7, -1.2, 1.2, 3.7, 6.1][seat] || 0;
+    this.playerX = startX;
+    this.cart.group.position.x = this.playerX;
+    for (const cart of this.remoteCarts.values()) cart.group.visible = false;
+    ui.mpScore.classList.remove('is-hidden');
+    ui.phase.textContent = 'CORRIDA MULTIPLAYER';
+    this.toastMessage('Desvie dos obstáculos e seja o último carrinho na ladeira!', 3);
+    trackFirebaseEvent('mp_match_start');
+  }
+  mpPlayerState() {
+    return {
+      ready: true,
+      x: Math.round(this.playerX * 100) / 100,
+      distance: Math.round(this.distance * 10) / 10,
+      speed: Math.max(0, Math.round(this.speed)),
+      score: Math.max(0, this.score + Math.floor(this.distance * 10)),
+      alive: this.health > 0 && !this.mp.finished,
+    };
+  }
+  renderMpScoreboard() {
+    const current = this.mp.players.map((player) => player.id === this.mp.playerId
+      ? { ...player, ...this.mpPlayerState(), score: this.score + Math.floor(this.distance * 10) }
+      : player);
+    const ordered = [...current].sort((a, b) => (b.score || 0) - (a.score || 0));
+    ui.mpScorePlayers.replaceChildren(...ordered.map((player) => {
+      const row = document.createElement('div');
+      row.className = `mp-score-row${player.id === this.mp.playerId ? ' is-you' : ''}${player.alive === false ? ' is-eliminated' : ''}`;
+      const name = document.createElement('span');
+      const seat = this.mp.playerIds.indexOf(player.id) + 1;
+      name.textContent = player.id === this.mp.playerId ? `VOCÊ · J${seat}` : `JOGADOR ${seat}`;
+      const score = document.createElement('strong'); score.textContent = number(player.score || 0);
+      row.append(name, score);
+      return row;
+    }));
+  }
+  updateMultiplayer(dt) {
+    const byId = new Map(this.mp.players.map((player) => [player.id, player]));
+    const activeRemoteIds = new Set();
+    for (const [seat, id] of this.mp.playerIds.entries()) {
+      if (id === this.mp.playerId) continue;
+      const player = byId.get(id);
+      if (!player) continue;
+      activeRemoteIds.add(id);
+      const cart = this.makeRemoteCart(id, seat);
+      cart.group.visible = true;
+      const targetZ = clamp(this.distance - (Number(player.distance) || 0), -80, 15);
+      const previousX = cart.group.position.x;
+      cart.group.position.z = damp(cart.group.position.z, targetZ, 8, dt);
+      cart.group.position.x = damp(previousX, Number(player.x) || 0, 8, dt);
+      const remoteSteer = clamp((cart.group.position.x - previousX) / Math.max(dt, .001) / 6, -1, 1);
+      cart.update(dt, player.speed || this.speed, remoteSteer, 0, true);
+    }
+    for (const [id, cart] of this.remoteCarts) {
+      if (!activeRemoteIds.has(id)) cart.group.visible = false;
+    }
+
+    if (!this.mp.finished) {
+      this.mp.syncTimer -= dt;
+      if (this.mp.syncTimer <= 0) {
+        this.mp.syncTimer = .35;
+        void updateMultiplayerPlayer(this.mp.code, this.mp.playerId, this.mpPlayerState());
+      }
+    }
+    this.mp.uiTimer -= dt;
+    if (this.mp.uiTimer <= 0) {
+      this.mp.uiTimer = .45;
+      this.renderMpScoreboard();
+    }
+
+    const livePlayers = this.mp.players.filter((player) => player.alive !== false && this.playerIsConnected(player));
+    const playerStatesLoaded = this.mp.players.length >= this.mp.playerIds.length;
+    if (playerStatesLoaded && !livePlayers.length && this.mp.players.length && !this.mp.resultsRequested) {
+      this.mp.resultsRequested = true;
+      const bestScore = Math.max(...this.mp.players.map((player) => Number(player.score) || 0));
+      const winners = this.mp.players.filter((player) => (Number(player.score) || 0) === bestScore);
+      const winner = winners.length === 1 ? winners[0].id : 'draw';
+      void updateMultiplayerRoom(this.mp.code, { status: 'finished', winner });
+      trackFirebaseEvent('mp_match_end', { winner, reason: 'all-finished' });
+    }
+  }
+  async finishMultiplayer(reason, roomGone = false) {
+    if (this.mp.finished || this.phase !== 'mp-playing') return;
+    this.mp.finished = true;
+    this.audio.setMotion(0, false); this.audio.play('gameover');
+    gameRoot.style.setProperty('--rush', '0');
+    if (roomGone) {
+      const bestScore = Math.max(0, ...this.mp.players.map((player) => Number(player.score) || 0));
+      const winners = this.mp.players.filter((player) => (Number(player.score) || 0) === bestScore);
+      this.showMultiplayerResult({ winner: winners.length === 1 ? winners[0].id : 'draw' });
+      return;
+    }
+    await updateMultiplayerPlayer(this.mp.code, this.mp.playerId, { ...this.mpPlayerState(), alive: false });
+    trackFirebaseEvent('mp_player_eliminated', { reason });
+  }
+  showMultiplayerResult(room) {
+    if (this.phase === 'mp-result') return;
+    this.phase = 'mp-result'; this.mp.finished = true;
+    this.audio.setMotion(0, false);
+    gameRoot.style.setProperty('--rush', '0');
+    ui.mpScore.classList.add('is-hidden'); ui.hud.classList.remove('is-visible');
+    ui.hints.classList.add('is-hidden'); ui.bottomline.classList.add('is-hidden'); ui.mobileControls.classList.add('is-hidden');
+    for (const cart of this.remoteCarts.values()) cart.group.visible = false;
+    const playersById = new Map(this.mp.allPlayers.map((player) => [player.id, player]));
+    const raceIds = this.mp.racePlayerIds.length ? this.mp.racePlayerIds : this.mp.playerIds;
+    const ordered = raceIds.map((id) => playersById.get(id)).filter(Boolean).sort((a, b) => (b.score || 0) - (a.score || 0));
+    ui.mpResults.replaceChildren(...ordered.map((player) => {
+      const seat = raceIds.indexOf(player.id) + 1;
+      const row = document.createElement('div');
+      row.className = `mp-result-player${player.id === room.winner ? ' is-winner' : ''}`;
+      const name = document.createElement('span');
+      name.textContent = player.id === this.mp.playerId ? `VOCÊ · J${seat}` : `JOGADOR ${seat}`;
+      const score = document.createElement('strong'); score.textContent = number(player.score || 0);
+      row.append(name, score);
+      return row;
+    }));
+    const winnerSeat = raceIds.indexOf(room.winner) + 1;
+    ui.mpResultTitle.textContent = room.winner === 'draw' ? 'EMPATE!' : room.winner === this.mp.playerId ? 'VITÓRIA!' : 'FIM DA DISPUTA';
+    ui.mpWinnerLine.textContent = room.winner === 'draw'
+      ? 'Empate técnico na ladeira.'
+      : room.winner === this.mp.playerId ? '🏆 Você venceu a corrida!' : `🏆 Jogador ${winnerSeat} venceu a corrida!`;
+    ui.mpRematchStatus.textContent = '';
+    ui.mpResult.classList.remove('is-hidden');
+    ui.phase.textContent = 'PARTIDA ENCERRADA';
+  }
+  requestRematch() {
+    this.audio.play('click');
+    if (!this.mp.code) return;
+    ui.mpRematchStatus.textContent = 'Aguardando os outros participantes…';
+    updateMultiplayerRoom(this.mp.code, { rematch: { [this.mp.playerId]: true } });
+  }
+  leaveRoom(silent = false) {
+    if (this.mp.code) void leaveMultiplayerRoom(this.mp.code, this.mp.role, this.mp.playerId);
+    this.mp.unsubscribe?.(); this.mp.unsubscribe = null;
+    clearInterval(this.mp.heartbeat);
+    this.mp.code = null; this.mp.role = null; this.mp.playerId = null; this.mp.hostId = null;
+    this.mp.playerIds = []; this.mp.players = []; this.mp.allPlayers = []; this.mp.racePlayerIds = [];
+    this.mp.finished = false; this.mp.resultsRequested = false;
+    for (const cart of this.remoteCarts.values()) cart.group.visible = false;
+    if (!silent) this.audio.play('click');
+    this.toMenu();
+  }
   difficulty() { return clamp(this.distance / 900, 0, 4); }
   update(dt) {
+    if (this.phase === 'mp-playing' && this.mp.finished) {
+      this.updateMultiplayer(dt);
+      return;
+    }
     this.time += dt;
     const diff = this.difficulty();
     const scoreForSpeed = this.score + Math.floor(this.distance * 10);
     const speedProgress = clamp(scoreForSpeed / 18000, 0, 1);
     this.targetSpeed = lerp(17, 40, speedProgress);
     if (this.key.down) this.targetSpeed = Math.max(10, this.targetSpeed - 7);
-    if (this.key.brake) this.targetSpeed = Math.max(11, this.targetSpeed * .59);
     if (this.powerup === 'turbo') this.targetSpeed *= 1.48;
     if (this.powerup === 'coffee-power') this.targetSpeed *= 1.83;
     if (this.powerup === 'brake') this.targetSpeed *= .56;
@@ -1010,8 +1346,7 @@ class Game {
     this.maxSpeed = Math.max(this.maxSpeed, this.speed * 2.45);
     const left = this.key.left ? -1 : 0; const right = this.key.right ? 1 : 0;
     const steer = clamp(left + right + this.mobileSteer + (this.mouseSteer ?? 0), -1, 1);
-    const steeringStrength = this.key.brake ? 1.33 : 1;
-    const wantedVelocity = steer * (5.4 + this.speed * .055) * steeringStrength;
+    const wantedVelocity = steer * (5.4 + this.speed * .055);
     this.steerVelocity = steer === 0 ? 0 : damp(this.steerVelocity, wantedVelocity, 7.5, dt);
     const wobble = this.impact > 0 ? Math.sin(this.time * 38) * this.impact * .055 : 0;
     this.playerX = clamp(this.playerX + (this.steerVelocity + wobble) * dt, -7.25, 7.25);
@@ -1038,6 +1373,7 @@ class Game {
     this.cameraController.update(dt, this.speed, true);
     this.audio.setMotion(this.speed, true);
     this.showDistanceJokes(); this.updateUI();
+    if (this.phase === 'mp-playing') this.updateMultiplayer(dt);
     if (this.health <= 0) this.endRun();
   }
   updateClouds(dt) {
@@ -1104,7 +1440,6 @@ class Game {
     ui.zone.textContent = zones;
     ui.combo.textContent = `x${this.combo}`;
     ui.powerTime.textContent = `${Math.max(0, this.powerTimer).toFixed(1)} s`;
-    ui.drift.classList.toggle('is-active', this.key.brake);
     const score = this.score + Math.floor(this.distance * 10); ui.score.textContent = number(score);
   }
   resize() {
@@ -1113,7 +1448,7 @@ class Game {
   }
   loop(now) {
     const dt = Math.min(.04, Math.max(0, (now - this.lastFrame) / 1000)); this.lastFrame = now;
-    if (this.phase === 'playing' && document.visibilityState !== 'hidden') this.update(dt);
+    if ((this.phase === 'playing' || this.phase === 'mp-playing') && document.visibilityState !== 'hidden') this.update(dt);
     else {
       const idleDt = Math.min(dt, .04); this.time += idleDt;
       const idleSpeed = this.phase === 'menu' ? 4.6 : 0;

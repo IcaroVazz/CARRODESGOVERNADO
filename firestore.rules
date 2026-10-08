@@ -60,5 +60,56 @@ service cloud.firestore {
         allow update, delete: if false;
       }
     }
+
+    function validRoom(data) {
+      return data.keys().hasOnly([
+          'createdAt', 'status', 'hostId', 'playerIds', 'winner', 'rematch'
+        ])
+        && data.keys().hasAll([
+          'createdAt', 'status', 'hostId', 'playerIds', 'winner', 'rematch'
+        ])
+        && data.createdAt is timestamp
+        && data.status in ['waiting', 'playing', 'finished']
+        && data.hostId is string
+        && data.playerIds is list
+        && data.playerIds.size() >= 1
+        && data.playerIds.size() <= 6
+        && data.hostId in data.playerIds
+        && (data.winner == null || data.winner == 'draw' || data.winner is string)
+        && data.rematch is map;
+    }
+
+    function validRoomPlayer(data) {
+      return data.keys().hasOnly([
+          'ready', 'x', 'distance', 'speed', 'score', 'alive', 'ping'
+        ])
+        && data.keys().hasAll([
+          'ready', 'x', 'distance', 'speed', 'score', 'alive', 'ping'
+        ])
+        && data.ready is bool
+        && (data.x is int || data.x is float)
+        && data.x >= -8 && data.x <= 8
+        && (data.distance is int || data.distance is float)
+        && data.distance >= 0
+        && data.speed is int && data.speed >= 0
+        && data.score is int && data.score >= 0
+        && data.alive is bool
+        && data.ping is timestamp;
+    }
+
+    match /rooms/{code} {
+      // Multiplayer rooms are public by design: joining only needs a six-character code.
+      allow read: if true;
+      allow create: if validRoom(request.resource.data)
+        && request.resource.data.status == 'waiting';
+      allow update: if validRoom(request.resource.data);
+      allow delete: if true;
+
+      match /players/{playerId} {
+        allow read: if true;
+        allow create, update: if validRoomPlayer(request.resource.data);
+        allow delete: if true;
+      }
+    }
   }
 }
