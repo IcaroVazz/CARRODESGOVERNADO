@@ -1106,12 +1106,13 @@ class Game {
       console.error('Falha ao criar sala multiplayer no Firestore.', error);
       ui.mpCode.textContent = '------';
       const code = String(error?.code || error?.message || '').toLowerCase();
+      const reason = String(error?.code || error?.name || 'erro-desconhecido').replace(/^firestore\//, '');
       if (code.includes('permission-denied')) {
-        this.setMpStatus('Acesso negado. No PowerShell, rode npx.cmd firebase login e publique firestore.rules.', true);
+        this.setMpStatus(`Acesso negado [${reason}]. Rode npx.cmd firebase login --reauth e depois npx.cmd firebase deploy --only firestore:rules --project carrinho-d139f.`, true);
       } else if (code.includes('unavailable') || code.includes('network')) {
-        this.setMpStatus('Sem conexão com o Firestore. Confira a internet e tente novamente.', true);
+        this.setMpStatus(`Sem conexão com o Firestore [${reason}]. Confira a internet.`, true);
       } else {
-        this.setMpStatus('Não foi possível criar a sala. Confira a configuração do Firestore e tente novamente.', true);
+        this.setMpStatus(`Falha ao criar sala [${reason}]. Confira a configuração do Firestore.`, true);
       }
     } finally {
       ui.mpCreate.disabled = false;

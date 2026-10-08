@@ -19,7 +19,7 @@ O multiplayer usa salas do Cloud Firestore e não exige conta nem login. Crie um
 Para habilitar salas sem autenticação, entre no CLI com uma conta que administra o projeto e publique as regras incluídas. Esse login serve só para configurar o Firebase; os jogadores continuam sem login:
 
 ```powershell
-npx.cmd firebase login
+npx.cmd firebase login --reauth
 npx.cmd firebase deploy --only firestore:rules
 ```
 

@@ -27,7 +27,10 @@ http.createServer((request, response) => {
 
   fs.readFile(file, (error, contents) => {
     if (error) { response.writeHead(error.code === 'ENOENT' ? 404 : 500).end('Not found'); return; }
-    response.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream' });
+    const extension = path.extname(file);
+    const headers = { 'Content-Type': types[extension] || 'application/octet-stream' };
+    if (['.html', '.js', '.css'].includes(extension)) headers['Cache-Control'] = 'no-cache';
+    response.writeHead(200, headers);
     response.end(contents);
   });
 }).listen(port, '127.0.0.1', () => {

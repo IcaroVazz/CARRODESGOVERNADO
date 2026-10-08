@@ -46,3 +46,26 @@ Before we get started, keep in mind:
     at async Command.initAction [as actionFn] (C:\Users\Vaz\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\commands\init.js:232:5)
 [error] 
 [error] Error: Failed to authenticate, have you run firebase login?
+[debug] [2026-10-08T13:17:11.642Z] ----------------------------------------------------------------------
+[debug] [2026-10-08T13:17:11.654Z] Command:       C:\Program Files\nodejs\node.exe C:\Workspace\CARRINHO SEM FREIO\node_modules\firebase-tools\lib\bin\firebase.js deploy --only firestore:rules --project carrinho-d139f --debug
+[debug] [2026-10-08T13:17:11.654Z] CLI Version:   15.32.1
+[debug] [2026-10-08T13:17:11.655Z] Platform:      win32
+[debug] [2026-10-08T13:17:11.655Z] Node Version:  v24.19.0
+[debug] [2026-10-08T13:17:11.655Z] Detected Agent: codex_cli
+[debug] [2026-10-08T13:17:11.655Z] Time:          Thu Oct 08 2026 10:17:11 GMT-0300 (Horário Padrão de Brasília)
+[debug] [2026-10-08T13:17:11.656Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-08T13:17:11.678Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-10-08T13:17:34.073Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-08T13:17:34.134Z] Error: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.
+    at GoogleAuth.getApplicationDefaultAsync (C:\Workspace\CARRINHO SEM FREIO\node_modules\google-auth-library\build\src\auth\googleauth.js:287:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GoogleAuth._GoogleAuth_determineClient (C:\Workspace\CARRINHO SEM FREIO\node_modules\google-auth-library\build\src\auth\googleauth.js:834:32)
+    at async GoogleAuth.getClient (C:\Workspace\CARRINHO SEM FREIO\node_modules\google-auth-library\build\src\auth\googleauth.js:698:20)
+    at async GoogleAuth.getAccessToken (C:\Workspace\CARRINHO SEM FREIO\node_modules\google-auth-library\build\src\auth\googleauth.js:722:24)
+    at async autoAuth (C:\Workspace\CARRINHO SEM FREIO\node_modules\firebase-tools\lib\requireAuth.js:38:19)
+    at async requireAuth (C:\Workspace\CARRINHO SEM FREIO\node_modules\firebase-tools\lib\requireAuth.js:100:20)
+    at async requirePermissions (C:\Workspace\CARRINHO SEM FREIO\node_modules\firebase-tools\lib\requirePermissions.js:12:5)
+    at async C:\Workspace\CARRINHO SEM FREIO\node_modules\firebase-tools\lib\command.js:278:17
+[error] 
+[error] Error: Failed to authenticate, have you run firebase login?
