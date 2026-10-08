@@ -374,11 +374,16 @@ class TrackGenerator {
 }
 
 class Cart {
-  constructor() {
+  constructor({ procedural = true } = {}) {
     this.group = new THREE.Group(); this.wheels = []; this.reaction = new THREE.Group(); this.group.add(this.reaction);
     this.handleHalfWidth = .48; this.handleY = 1.16; this.handleZ = 1.29;
     this.riderWobbleTime = 0;
-    this.buildBasket(); this.buildFrame(); this.buildWheels(); this.buildRider();
+    if (procedural) {
+      this.buildBasket(); this.buildFrame(); this.buildWheels();
+    } else {
+      this.proceduralBasket = null; this.proceduralFrame = null; this.proceduralNose = null;
+    }
+    this.buildRider(procedural);
     this.group.add(this.reaction);
     this.shadow = new THREE.Mesh(new THREE.CircleGeometry(1.43, 28), new THREE.MeshBasicMaterial({ color: 0x22342d, transparent: true, opacity: .19, depthWrite: false }));
     this.shadow.rotation.x = -Math.PI / 2; this.shadow.scale.set(1.0, 1.55, 1); this.shadow.position.set(0, -.02, .1); this.group.add(this.shadow);
@@ -452,13 +457,19 @@ class Cart {
     for (const part of this.proceduralRiderParts) { this.rider.remove(part); disposeObject(part); }
     this.proceduralRiderParts.length = 0;
   }
-  buildRider() {
+  buildRider(procedural = true) {
     const riderPivot = new THREE.Group(); riderPivot.position.set(0, this.handleY, this.handleZ); this.reaction.add(riderPivot);
     const rider = new THREE.Group();
     rider.position.set(.16, .10 - this.handleY, 2.42 - this.handleZ);
     rider.rotation.x = -.68;
     rider.scale.setScalar(1.08);
     riderPivot.add(rider);
+
+    if (!procedural) {
+      this.rider = rider; this.riderPivot = riderPivot; this.riderBaseScale = rider.scale.clone();
+      this.riderPivotBasePosition = riderPivot.position.clone(); this.proceduralRiderParts = [];
+      return;
+    }
 
     const skin = material(0xc98961, .86);
     const jersey = material(0xf07825, .76);
@@ -695,6 +706,7 @@ class ParticleSystem {
 class AssetManager {
   constructor(game) {
     this.game = game; this.loader = new GLTFLoader(); this.cartLoaded = true;
+    this.riderPoseCache = new WeakMap();
     this.loadCart(); this.loadRider(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadPickupModels() {
@@ -779,7 +791,10 @@ class AssetManager {
       this.game.cart.riderPivotBasePosition.copy(this.game.cart.riderPivot.position);
       this.game.setMultiplayerCartModel(model, size, scale);
       this.cartLoaded = true;
-      if (this.localRiderModel) this.poseRiderOnCart(this.localRiderModel, this.game.cart);
+      if (this.localRiderModel) {
+        this.poseRiderOnCart(this.localRiderModel, this.game.cart);
+        this.game.setMultiplayerRiderModel(this.localRiderModel);
+      }
     }, undefined, (error) => console.warn('Modelo do carrinho indisponível; usando o modelo integrado.', error));
   }
 
@@ -803,12 +818,12 @@ class AssetManager {
       this.game.cart.updateRiderPose = null;
       this.poseRiderOnCart(localModel, this.game.cart);
       this.game.cart.removeProceduralRider();
-      this.game.setMultiplayerRiderModel(model);
+      this.game.setMultiplayerRiderModel(localModel);
       this.riderLoaded = true;
     }, undefined, (error) => console.warn('Modelo do personagem indisponível; usando o personagem integrado.', error));
   }
   poseRiderOnCart(model, cart = this.game.cart) {
-    let pose = model.userData.cartPose;
+    let pose = this.riderPoseCache.get(model);
     if (!pose) {
       pose = { meshes: [] };
       model.traverse((object) => {
@@ -819,7 +834,7 @@ class AssetManager {
           source: object.geometry.getAttribute('position').array.slice(),
         });
       });
-      model.userData.cartPose = pose;
+      this.riderPoseCache.set(model, pose);
     }
 
     model.updateWorldMatrix(true, true); cart.group.updateMatrixWorld(true);
@@ -917,7 +932,7 @@ class Game {
     this.mp = {
       code: null, role: null, playerId: null, hostId: null, playerIds: [], players: [], allPlayers: [], racePlayerIds: [],
       unsubscribe: null, heartbeat: 0, syncTimer: 0, uiTimer: 0,
-      finished: false, resultsRequested: false, rematchStarting: false,
+      finished: false, finalState: null, resultsRequested: false, rematchStarting: false,
       pingSeen: new Map(), motionBuffers: new Map(), motionSignatures: new Map(),
     };
     this.remoteCarts = new Map();
@@ -1095,7 +1110,9 @@ class Game {
     this.camera.position.set(0, 6, 10.7); this.cameraController.shake = 0;
     ui.menu.classList.add('is-hidden'); ui.gameover.classList.add('is-hidden'); ui.hud.classList.add('is-visible'); ui.sideRecord.classList.add('is-hidden');
     ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.add('is-hidden'); ui.mpResult.classList.add('is-hidden'); ui.mpScore.classList.add('is-hidden');
-    for (const cart of this.remoteCarts.values()) cart.group.visible = false;
+    for (const cart of this.remoteCarts.values()) {
+      cart.group.visible = false; cart.group.userData.hasRemoteMotion = false;
+    }
     ui.hints.classList.remove('is-hidden'); ui.bottomline.classList.remove('is-hidden'); ui.mobileControls.classList.remove('is-hidden');
     ui.hints.style.opacity = ''; ui.run.textContent = String(this.runCount).padStart(3, '0');
     ui.phase.textContent = 'DESCIDA EM ANDAMENTO'; ui.comboBadge.classList.remove('is-active'); ui.powerBadge.classList.remove('is-active');
@@ -1375,11 +1392,12 @@ class Game {
   makeRemoteCart(playerId) {
     let cart = this.remoteCarts.get(playerId);
     if (cart) return cart;
-    cart = new Cart();
+    cart = new Cart({ procedural: !this.multiplayerCartModel || !this.multiplayerRiderModel });
     cart.shadow.material = new THREE.MeshBasicMaterial({ color: 0x5a3226, transparent: true, opacity: .19, depthWrite: false });
     if (this.multiplayerCartModel) this.installMultiplayerCartModel(cart);
     this.scene.add(cart.group);
     this.remoteCarts.set(playerId, cart);
+    if (this.multiplayerRiderModel) this.installMultiplayerRiderModel(cart);
     return cart;
   }
   setMultiplayerCartModel(model, size, scale) {
@@ -1418,7 +1436,6 @@ class Game {
       if (object.isMesh) { object.castShadow = false; object.receiveShadow = false; }
     });
     cart.rider.add(rider);
-    this.assets.poseRiderOnCart(rider, cart);
     cart.removeProceduralRider();
     cart.group.userData.hasMultiplayerRiderModel = true;
   }
@@ -1426,7 +1443,7 @@ class Game {
     if (this.phase === 'mp-playing') return;
     this.start();
     this.phase = 'mp-playing';
-    this.mp.finished = false; this.mp.resultsRequested = false; this.mp.syncTimer = 0; this.mp.uiTimer = 0;
+    this.mp.finished = false; this.mp.finalState = null; this.mp.resultsRequested = false; this.mp.syncTimer = 0; this.mp.uiTimer = 0;
     this.mp.racePlayerIds = [...this.mp.playerIds];
     const seat = Math.max(0, this.mp.playerIds.indexOf(this.mp.playerId));
     const startX = MULTIPLAYER_START_X[seat] ?? 0;
@@ -1448,6 +1465,7 @@ class Game {
     trackFirebaseEvent('mp_match_start');
   }
   mpPlayerState() {
+    if (this.mp.finished && this.mp.finalState) return { ...this.mp.finalState, alive: false };
     return {
       ready: true,
       x: Math.round(this.playerX * 100) / 100,
@@ -1459,7 +1477,7 @@ class Game {
   }
   renderMpScoreboard() {
     const current = this.mp.players.map((player) => player.id === this.mp.playerId
-      ? { ...player, ...this.mpPlayerState(), score: this.score + Math.floor(this.distance * 10) }
+      ? { ...player, ...this.mpPlayerState() }
       : player);
     const ordered = [...current].sort((a, b) => (b.score || 0) - (a.score || 0));
     ui.mpScorePlayers.replaceChildren(...ordered.map((player) => {
@@ -1484,10 +1502,20 @@ class Game {
       const cart = this.makeRemoteCart(id);
       cart.group.visible = true;
       const motion = this.interpolatedRemoteMotion(player, performance.now());
-      const targetZ = clamp(this.distance - motion.distance, -80, 15);
-      const previousX = cart.group.position.x;
-      cart.group.position.z = targetZ;
-      cart.group.position.x = motion.x;
+      const playerSeat = this.mp.playerIds.indexOf(id);
+      const localSeat = this.mp.playerIds.indexOf(this.mp.playerId);
+      const row = Math.max(0, playerSeat < localSeat ? playerSeat : playerSeat - 1);
+      const progressOffset = Math.tanh((motion.distance - this.distance) / 90);
+      const rowZ = -7 - row * 2.6 - progressOffset * 1.1;
+      const halfHorizontalFov = Math.atan(Math.tan(this.camera.fov * Math.PI / 360) * this.camera.aspect);
+      const visibleDepth = (Math.abs(motion.x - this.camera.position.x) + 1.35) / Math.tan(halfHorizontalFov);
+      const visibleZ = this.camera.position.z - visibleDepth;
+      const targetZ = clamp(Math.min(rowZ, visibleZ), -28, -5.5);
+      const hasMotion = cart.group.userData.hasRemoteMotion;
+      const previousX = hasMotion ? cart.group.position.x : motion.x;
+      cart.group.position.z = hasMotion ? damp(cart.group.position.z, targetZ, 10, dt) : targetZ;
+      cart.group.position.x = hasMotion ? damp(cart.group.position.x, motion.x, 18, dt) : motion.x;
+      cart.group.userData.hasRemoteMotion = true;
       const remoteSteer = clamp((cart.group.position.x - previousX) / Math.max(dt, .001) / 6, -1, 1);
       cart.update(dt, motion.speed || this.speed, remoteSteer, 0, true);
     }
@@ -1495,12 +1523,10 @@ class Game {
       if (!activeRemoteIds.has(id)) cart.group.visible = false;
     }
 
-    if (!this.mp.finished) {
-      this.mp.syncTimer -= dt;
-      if (this.mp.syncTimer <= 0) {
-        this.mp.syncTimer = MP_SYNC_INTERVAL;
-        void updateMultiplayerPlayer(this.mp.code, this.mp.playerId, this.mpPlayerState());
-      }
+    this.mp.syncTimer -= dt;
+    if (this.mp.syncTimer <= 0 && this.mp.code && this.mp.playerId) {
+      this.mp.syncTimer = this.mp.finished ? 1.2 : MP_SYNC_INTERVAL;
+      void updateMultiplayerPlayer(this.mp.code, this.mp.playerId, this.mpPlayerState());
     }
     this.mp.uiTimer -= dt;
     if (this.mp.uiTimer <= 0) {
@@ -1522,7 +1548,9 @@ class Game {
   }
   async finishMultiplayer(reason, roomGone = false) {
     if (this.mp.finished || this.phase !== 'mp-playing') return;
+    this.mp.finalState = { ...this.mpPlayerState(), alive: false };
     this.mp.finished = true;
+    this.obstacles.reset();
     this.audio.setMotion(0, false); this.audio.play('gameover');
     gameRoot.style.setProperty('--rush', '0');
     if (roomGone) {
@@ -1531,7 +1559,10 @@ class Game {
       this.showMultiplayerResult({ winner: winners.length === 1 ? winners[0].id : 'draw' });
       return;
     }
-    await updateMultiplayerPlayer(this.mp.code, this.mp.playerId, { ...this.mpPlayerState(), alive: false });
+    ui.phase.textContent = 'VOCÊ BATEU · ACOMPANHANDO A CORRIDA';
+    ui.hints.classList.add('is-hidden'); ui.bottomline.classList.add('is-hidden'); ui.mobileControls.classList.add('is-hidden');
+    this.toastMessage('Você foi eliminado. Acompanhe o restante da corrida.', 3);
+    await updateMultiplayerPlayer(this.mp.code, this.mp.playerId, this.mpPlayerState());
     trackFirebaseEvent('mp_player_eliminated', { reason });
   }
   showMultiplayerResult(room) {
@@ -1580,16 +1611,28 @@ class Game {
     clearInterval(this.mp.heartbeat);
     this.mp.code = null; this.mp.role = null; this.mp.playerId = null; this.mp.hostId = null;
     this.mp.playerIds = []; this.mp.players = []; this.mp.allPlayers = []; this.mp.racePlayerIds = [];
-    this.mp.finished = false; this.mp.resultsRequested = false;
+    this.mp.finished = false; this.mp.finalState = null; this.mp.resultsRequested = false;
     this.mp.pingSeen.clear(); this.mp.motionBuffers.clear(); this.mp.motionSignatures.clear();
     for (const cart of this.remoteCarts.values()) cart.group.visible = false;
     if (!silent) this.audio.play('click');
     this.toMenu();
   }
   difficulty() { return clamp(this.distance / 900, 0, 4); }
+  updateEliminatedSpectator(dt) {
+    const spectatorSpeed = Math.max(17, this.speed);
+    this.time += dt;
+    this.distance += spectatorSpeed * dt;
+    this.track.update(dt, spectatorSpeed);
+    this.particles.update(dt);
+    this.updateClouds(dt);
+    this.cart.group.position.y = .11 + Math.sin(this.time * 14) * .022;
+    this.cart.update(dt, spectatorSpeed, 0, 0, false);
+    this.cameraController.update(dt, spectatorSpeed, true);
+    this.updateMultiplayer(dt);
+  }
   update(dt) {
     if (this.phase === 'mp-playing' && this.mp.finished) {
-      this.updateMultiplayer(dt);
+      this.updateEliminatedSpectator(dt);
       return;
     }
     this.time += dt;
@@ -1651,12 +1694,14 @@ class Game {
     }
   }
   onDodge(x, kind) {
+    if (this.phase === 'mp-playing' && this.mp.finished) return;
     this.dodges++; this.combo = Math.min(12, this.combo + 1); this.comboTimer = 2.8;
     this.score += 30 * this.combo; this.audio.play('dodge');
     ui.combo.textContent = `x${this.combo}`; ui.comboBadge.classList.add('is-active');
     if (kind === 'cow' || kind === 'tvman' || kind === 'snowman') this.toastMessage(choose(['A vaca ficou impressionada.', 'A gerência finge que não viu.', 'A física pediu demissão.']), 1.55);
   }
   onCollision(x, kind) {
+    if (this.phase === 'mp-playing' && this.mp.finished) return;
     if (this.invulnerable > 0) return;
     this.hits++; this.health = 0; this.combo = 1; this.comboTimer = 0; this.invulnerable = 1.2;
     this.targetSpeed = Math.max(11, this.speed * .62); this.speed *= .77; this.impact = .85; this.impactVelocity = x < this.playerX ? 1 : -1;
@@ -1667,6 +1712,7 @@ class Game {
     this.toastMessage('Uma batida. Fim da descida.', 1.4);
   }
   onCollect(kind, x, entityType) {
+    if (this.phase === 'mp-playing' && this.mp.finished) return;
     if (entityType === 'coin') {
       const values = { coin: 250, burger: 260, soda: 180, coffee: 240, coupon: 320, chips: 210, cash: 400 };
       this.score += (values[kind] || 160) * this.combo; this.audio.play('coin');
