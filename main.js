@@ -2,14 +2,17 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   createMultiplayerRoom,
+  finishMultiplayerRoom,
   joinMultiplayerRoom,
   leaveMultiplayerRoom,
   listenMultiplayerRoom,
   loadFirebasePlayer,
+  requestMultiplayerRematch,
   saveFirebaseRun,
+  startMultiplayerRematch,
+  startMultiplayerRoom,
   trackFirebaseEvent,
   updateMultiplayerPlayer,
-  updateMultiplayerRoom,
 } from './firebase.js';
 
 const $ = (id) => document.getElementById(id);
@@ -50,7 +53,7 @@ const ui = {
   finalDodges: $('final-dodges'), finalHits: $('final-hits'), finalSpeed: $('final-speed'),
   newRecord: $('new-record'), run: $('run-number'), tip: $('bottom-tip'), bottomline: document.querySelector('.bottomline'), mobileControls: $('mobile-controls'),
   mpButton: $('mp-button'), mpMenu: $('mp-menu'), mpCreate: $('mp-create'), mpJoin: $('mp-join'), mpBack: $('mp-back'),
-  mpLobby: $('mp-lobby'), mpCodeBlock: $('mp-code-block'), mpCode: $('mp-code'), mpJoinBlock: $('mp-join-block'),
+  mpLobby: $('mp-lobby'), mpCodeBlock: $('mp-code-block'), mpCode: $('mp-code'), mpCopy: $('mp-copy'), mpJoinBlock: $('mp-join-block'),
   mpCodeInput: $('mp-code-input'), mpJoinConfirm: $('mp-join-confirm'), mpStatus: $('mp-status'),
   mpLobbyPlayers: $('mp-lobby-players'), mpStart: $('mp-start'), mpLeave: $('mp-leave'),
   mpResult: $('mp-result'), mpResultTitle: $('mp-result-title'), mpResults: $('mp-results'),
@@ -400,51 +403,68 @@ class Cart {
   }
   buildRider() {
     const riderPivot = new THREE.Group(); riderPivot.position.set(0, this.handleY, this.handleZ); this.reaction.add(riderPivot);
-    const rider = new THREE.Group(); rider.position.set(.22, .10 - this.handleY, 2.65 - this.handleZ); rider.rotation.x = -.8; rider.scale.setScalar(1.35); riderPivot.add(rider);
-    const skin = material(0xd99a6c, .82, 0, 0, true);
-    const tankTop = material(0x14171c, .88, 0, 0, true);
-    const pants = material(0x1b1e24, .92, 0, 0, true);
-    const shoe = material(0xf6fbff, .8, 0, 0, true);
-    const helmetMat = material(0x101318, .32, .3, 0, true);
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.33, .44, 4, 8), tankTop);
-    torso.position.set(0, .53, .02); torso.rotation.x = .18; rider.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(.29, 12, 9), skin); head.position.set(0, 1.11, -.16); rider.add(head);
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(.34, 14, 10, 0, Math.PI * 2, 0, Math.PI * .64), helmetMat);
-    helmet.position.set(0, 1.14, -.13); helmet.rotation.x = -.22; rider.add(helmet);
-    const helmetBack = new THREE.Mesh(new THREE.SphereGeometry(.33, 12, 8, 0, Math.PI * 2, Math.PI * .5, Math.PI * .2), helmetMat);
-    helmetBack.position.set(0, 1.12, -.08); helmetBack.rotation.x = .5; rider.add(helmetBack);
-    const band = new THREE.Mesh(new THREE.TorusGeometry(.312, .042, 6, 18), material(0xc22730, .55, .05, 0, true));
-    band.position.set(0, 1.235, -.135); band.rotation.x = Math.PI / 2 - .3; rider.add(band);
-    const bandStripe = new THREE.Mesh(new THREE.TorusGeometry(.315, .016, 5, 18), material(0xf6fbff, .5, 0, 0, true));
-    bandStripe.position.set(0, 1.238, -.135); bandStripe.rotation.x = Math.PI / 2 - .3; rider.add(bandStripe);
-    const mouth = new THREE.Mesh(new THREE.SphereGeometry(.078, 8, 6), material(0x4a1a16, .7, 0, 0, true));
-    mouth.scale.set(1, 1.4, .55); mouth.position.set(0, .99, -.43); rider.add(mouth);
-    const ear = new THREE.Mesh(new THREE.SphereGeometry(.06, 7, 6), skin);
-    for (const side of [-1, 1]) { const e = ear.clone(); e.position.set(side * .275, 1.07, -.15); rider.add(e); }
-    const eyesMat = material(0x273738, .6, 0, 0, true);
+    const rider = new THREE.Group();
+    rider.position.set(.16, .10 - this.handleY, 2.42 - this.handleZ);
+    rider.rotation.x = -.68;
+    rider.scale.setScalar(1.08);
+    riderPivot.add(rider);
+
+    const skin = material(0xc98961, .86);
+    const jersey = material(0xf07825, .76);
+    const jerseyTrim = material(0xffdd79, .65);
+    const pants = material(0x334b5a, .86);
+    const shoe = material(0xeaf4f5, .72);
+    const helmetShell = material(0xf0f4ef, .32, .12);
+    const helmetRed = material(0xc72f45, .4, .08);
+    const visor = material(0x18364a, .24, .18);
+
+    // Narrow rounded torso, with a colored back panel visible from the chase camera.
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.215, .30, 5, 12), jersey);
+    torso.scale.set(1, 1, .82); torso.position.set(0, .56, .015); torso.rotation.x = .12; rider.add(torso);
+    const backPanel = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), jerseyTrim);
+    backPanel.scale.set(.13, .22, .035); backPanel.position.set(0, .57, .194); rider.add(backPanel);
+    const belt = new THREE.Mesh(new THREE.TorusGeometry(.175, .026, 6, 14), material(0x203b4c, .78));
+    belt.position.set(0, .34, .02); belt.rotation.x = Math.PI / 2; rider.add(belt);
+
+    const neck = new THREE.Mesh(new THREE.CapsuleGeometry(.085, .10, 3, 8), skin);
+    neck.position.set(0, .88, -.035); neck.rotation.x = -.16; rider.add(neck);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(.205, 14, 10), skin);
+    head.position.set(0, 1.045, -.105); rider.add(head);
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(.255, 16, 12), helmetShell);
+    helmet.scale.set(1, .88, 1.08); helmet.position.set(0, 1.105, -.11); rider.add(helmet);
+    const helmetCrown = new THREE.Mesh(new THREE.SphereGeometry(.262, 14, 8, 0, Math.PI * 2, 0, Math.PI * .40), helmetRed);
+    helmetCrown.scale.set(1, .72, 1.04); helmetCrown.position.set(0, 1.13, -.105); rider.add(helmetCrown);
+    const helmetBand = new THREE.Mesh(new THREE.TorusGeometry(.226, .025, 6, 20), helmetRed);
+    helmetBand.position.set(0, 1.095, -.11); helmetBand.rotation.x = Math.PI / 2 - .12; rider.add(helmetBand);
+    const helmetVisor = new THREE.Mesh(new THREE.SphereGeometry(.19, 12, 7, 0, Math.PI, 0, Math.PI * .42), visor);
+    helmetVisor.scale.set(1, .8, .42); helmetVisor.position.set(0, 1.065, -.303); helmetVisor.rotation.x = -.18; rider.add(helmetVisor);
+
     for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(.03, 6, 6), eyesMat); eye.position.set(side * .095, 1.13, -.42); rider.add(eye);
-      const hip = new THREE.Vector3(side * .18, .31, .02);
-      const knee = side < 0 ? new THREE.Vector3(side * .20, .82, .10) : new THREE.Vector3(side * .20, .78, .20);
-      const ankle = side < 0 ? new THREE.Vector3(side * .20, .67, .18) : new THREE.Vector3(side * .20, .67, .32);
-      rodBetween(rider, hip, knee, .105, pants, 8); rodBetween(rider, knee, ankle, .08, pants, 8);
-      const foot = new THREE.Mesh(new THREE.CapsuleGeometry(.09, .20, 3, 6), shoe);
-      foot.position.set(side * .20, ankle.y, ankle.z + .08); foot.rotation.x = Math.PI / 2; rider.add(foot);
-      const shoulder = new THREE.Vector3(side * .25, 1, -.035);
-      const elbow = new THREE.Vector3(side * .16, 1.12, -.07);
-      const handPoint = new THREE.Vector3(side * .10, 1.26, -.13);
-      rodBetween(rider, shoulder, elbow, .071, skin, 8); rodBetween(rider, elbow, handPoint, .059, skin, 8);
-      if (side === 1) {
-        const tattoo = new THREE.Mesh(new THREE.TorusGeometry(.078, .014, 5, 10), material(0x2f3a44, .8, 0, 0, true));
-        tattoo.position.copy(shoulder).lerp(elbow, .45);
-        tattoo.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), elbow.clone().sub(shoulder).normalize());
-        rider.add(tattoo);
-      }
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(.09, 8, 7), skin); hand.position.copy(handPoint); rider.add(hand);
+      const hip = new THREE.Vector3(side * .12, .34, .02);
+      const knee = new THREE.Vector3(side * .17, .25, .34);
+      const ankle = new THREE.Vector3(side * .18, .15, .18);
+      rodBetween(rider, hip, knee, .105, pants, 9);
+      rodBetween(rider, knee, ankle, .078, pants, 9);
+      const shoeMesh = new THREE.Mesh(new THREE.CapsuleGeometry(.073, .15, 4, 8), shoe);
+      shoeMesh.position.set(side * .18, .12, .12); shoeMesh.rotation.x = Math.PI / 2; rider.add(shoeMesh);
+
+      const shoulder = new THREE.Vector3(side * .19, .78, .005);
+      const elbow = new THREE.Vector3(side * .34, .91, -.13);
+      const handPoint = new THREE.Vector3(side * .46, 1.02, -.34);
+      const shoulderCap = new THREE.Mesh(new THREE.SphereGeometry(.115, 10, 8), jersey);
+      shoulderCap.position.copy(shoulder); rider.add(shoulderCap);
+      rodBetween(rider, shoulder, elbow, .082, jersey, 9);
+      rodBetween(rider, elbow, handPoint, .053, skin, 9);
+      const wrist = new THREE.Mesh(new THREE.SphereGeometry(.062, 9, 7), skin);
+      wrist.position.copy(handPoint); rider.add(wrist);
+      const glove = new THREE.Mesh(new THREE.SphereGeometry(.068, 9, 7), jerseyTrim);
+      glove.scale.set(1, .72, 1.1); glove.position.copy(handPoint).add(new THREE.Vector3(0, -.01, -.055)); rider.add(glove);
     }
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(.18, .03, 6, 12), tankTop);
-    collar.position.set(0, .78, -.035); collar.rotation.x = Math.PI / 2; rider.add(collar);
-    this.rider = rider; this.riderPivot = riderPivot; this.riderBaseScale = rider.scale.clone();
+
+    const chestMark = new THREE.Mesh(new THREE.SphereGeometry(.12, 10, 7), helmetRed);
+    chestMark.scale.set(.56, .58, .22); chestMark.position.set(0, .62, -.178); rider.add(chestMark);
+    this.rider = rider; this.riderJersey = jersey; this.riderHelmetAccent = helmetRed;
+    this.riderPivot = riderPivot; this.riderBaseScale = rider.scale.clone();
     this.riderPivotBasePosition = riderPivot.position.clone(); this.proceduralRiderParts = [...rider.children];
   }
   update(dt, speed, steer, bump, active) {
@@ -624,7 +644,7 @@ class ParticleSystem {
 class AssetManager {
   constructor(game) {
     this.game = game; this.loader = new GLTFLoader(); this.cartLoaded = true;
-    this.loadCart(); this.loadObstacleModels(); this.loadPickupModels();
+    this.loadCart(); this.loadRider(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadPickupModels() {
     const specs = [
@@ -707,8 +727,9 @@ class AssetManager {
       this.game.cart.riderPivot.position.set(0, this.game.cart.handleY, this.game.cart.handleZ);
       this.game.cart.rider.position.copy(riderOrigin).sub(this.game.cart.riderPivot.position);
       this.game.cart.riderPivotBasePosition.copy(this.game.cart.riderPivot.position);
+      this.game.setMultiplayerCartModel(model, size, scale);
       this.cartLoaded = true;
-      if (this.riderModel) this.poseRiderOnCart(this.riderModel);
+      if (this.localRiderModel) this.poseRiderOnCart(this.localRiderModel, this.game.cart);
     }, undefined, (error) => console.warn('Modelo do carrinho indisponível; usando o modelo integrado.', error));
   }
   loadRider() {
@@ -721,16 +742,20 @@ class AssetManager {
       model.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
       model.rotation.y = Math.PI;
       model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      for (const part of this.game.cart.proceduralRiderParts) part.visible = false;
-      model.name = 'modelo-stickmanFet'; this.game.cart.rider.add(model);
+      model.name = 'modelo-stickmanFet-template';
       this.riderModel = model;
+      const localModel = model.clone(true);
+      localModel.name = 'modelo-stickmanFet';
+      for (const part of this.game.cart.proceduralRiderParts) part.visible = false;
+      this.game.cart.rider.add(localModel);
+      this.localRiderModel = localModel;
       this.game.cart.updateRiderPose = null;
-      this.poseRiderOnCart(model);
+      this.poseRiderOnCart(localModel, this.game.cart);
+      this.game.setMultiplayerRiderModel(model);
       this.riderLoaded = true;
     }, undefined, (error) => console.warn('Modelo do personagem indisponível; usando o personagem integrado.', error));
   }
-  poseRiderOnCart(model) {
-    const cart = this.game.cart;
+  poseRiderOnCart(model, cart = this.game.cart) {
     let pose = model.userData.cartPose;
     if (!pose) {
       pose = { meshes: [] };
@@ -839,9 +864,11 @@ class Game {
     this.mp = {
       code: null, role: null, playerId: null, hostId: null, playerIds: [], players: [], allPlayers: [], racePlayerIds: [],
       unsubscribe: null, heartbeat: 0, syncTimer: 0, uiTimer: 0,
-      finished: false, resultsRequested: false, rematchStarting: false,
+      finished: false, resultsRequested: false, rematchStarting: false, pingSeen: new Map(),
     };
     this.remoteCarts = new Map();
+    this.multiplayerCartModel = null;
+    this.multiplayerRiderModel = null;
     this.audio = new AudioManager();
     this.setupThree();
     this.makeWorld();
@@ -959,8 +986,9 @@ class Game {
     ui.mpJoinConfirm.addEventListener('click', () => this.confirmJoin());
     ui.mpStart.addEventListener('click', () => {
       this.audio.play('click');
-      if (this.mp.code) updateMultiplayerRoom(this.mp.code, { status: 'playing', winner: null, rematch: null });
+      void this.beginMultiplayerRoom();
     });
+    ui.mpCopy.addEventListener('click', () => this.copyRoomCode());
     ui.mpLeave.addEventListener('click', () => this.leaveRoom());
     ui.mpRematch.addEventListener('click', () => this.requestRematch());
     ui.mpExit.addEventListener('click', () => this.leaveRoom());
@@ -1046,7 +1074,10 @@ class Game {
     ui.sideRecord.classList.add('is-hidden'); this.populateMenu();
     ui.hints.classList.add('is-hidden'); ui.bottomline.classList.add('is-hidden'); ui.mobileControls.classList.add('is-hidden');
   }
-  setMpStatus(message) { ui.mpStatus.textContent = message; }
+  setMpStatus(message, isError = false) {
+    ui.mpStatus.textContent = message;
+    ui.mpStatus.classList.toggle('is-error', isError);
+  }
   showLobby(mode) {
     ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.remove('is-hidden');
     ui.mpCodeBlock.classList.toggle('is-hidden', mode !== 'host');
@@ -1061,6 +1092,7 @@ class Game {
   }
   async hostRoom() {
     this.audio.unlock(); this.audio.play('click');
+    ui.mpCreate.disabled = true;
     this.showLobby('host'); ui.mpCode.textContent = '······';
     this.setMpStatus('Criando sala…');
     try {
@@ -1070,8 +1102,47 @@ class Game {
       this.setMpStatus('Compartilhe o código e aguarde os participantes.');
       this.listenRoom();
       trackFirebaseEvent('mp_room_created');
+    } catch (error) {
+      console.error('Falha ao criar sala multiplayer no Firestore.', error);
+      ui.mpCode.textContent = '------';
+      const code = String(error?.code || error?.message || '').toLowerCase();
+      if (code.includes('permission-denied')) {
+        this.setMpStatus('Acesso negado. No PowerShell, rode npx.cmd firebase login e publique firestore.rules.', true);
+      } else if (code.includes('unavailable') || code.includes('network')) {
+        this.setMpStatus('Sem conexão com o Firestore. Confira a internet e tente novamente.', true);
+      } else {
+        this.setMpStatus('Não foi possível criar a sala. Confira a configuração do Firestore e tente novamente.', true);
+      }
+    } finally {
+      ui.mpCreate.disabled = false;
+    }
+  }
+  async copyRoomCode() {
+    const code = ui.mpCode.textContent;
+    if (!/^[A-Z2-9]{6}$/.test(code)) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      this.setMpStatus('Código copiado. Envie para os outros jogadores.');
     } catch {
-      this.setMpStatus('Não foi possível criar a sala. Verifique a conexão e as regras do Firestore.');
+      this.setMpStatus(`Código da sala: ${code}`);
+    }
+  }
+  async beginMultiplayerRoom() {
+    if (!this.mp.code || this.mp.role !== 'host') return;
+    ui.mpStart.disabled = true;
+    this.setMpStatus('Preparando a corrida…');
+    try {
+      await startMultiplayerRoom(this.mp.code, this.mp.playerId);
+    } catch (error) {
+      const messages = {
+        'need-players': 'É preciso ter pelo menos dois jogadores.',
+        'not-host': 'Somente quem criou a sala pode iniciar.',
+        unavailable: 'Esta sala já foi iniciada ou encerrada.',
+        'not-found': 'A sala não está mais disponível.',
+      };
+      this.setMpStatus(messages[error.message] || 'Não foi possível iniciar. Confira a conexão e as regras do Firestore.');
+    } finally {
+      ui.mpStart.disabled = false;
     }
   }
   async confirmJoin() {
@@ -1119,8 +1190,13 @@ class Game {
     });
   }
   playerIsConnected(player) {
-    const lastPing = player.ping?.toMillis?.();
-    return !lastPing || Date.now() - lastPing < 15000;
+    const stamp = player.ping?.toMillis?.() ?? null;
+    const previous = this.mp.pingSeen.get(player.id);
+    if (!previous || previous.stamp !== stamp) {
+      this.mp.pingSeen.set(player.id, { stamp, seenAt: performance.now() });
+      return true;
+    }
+    return performance.now() - previous.seenAt < 15000;
   }
   onRoomUpdate(room, players = []) {
     if (!this.mp.code) return;
@@ -1134,6 +1210,11 @@ class Game {
     this.mp.playerIds = Array.isArray(room.playerIds) ? room.playerIds : [];
     this.mp.allPlayers = players;
     this.mp.players = players.filter((player) => this.mp.playerIds.includes(player.id));
+    if (room.status === 'closed') {
+      this.setMpStatus('O anfitrião encerrou a sala.');
+      this.leaveRoom(true);
+      return;
+    }
     if (!this.mp.playerIds.includes(this.mp.playerId)) {
       this.leaveRoom(true);
       return;
@@ -1158,9 +1239,8 @@ class Game {
       if (this.mp.role === 'host' && !this.mp.rematchStarting
         && this.mp.playerIds.length >= 2 && this.mp.playerIds.every((id) => rematch[id])) {
         this.mp.rematchStarting = true;
-        const reset = { ready: true, x: 0, distance: 0, speed: 0, score: 0, alive: true };
-        void Promise.all(this.mp.playerIds.map((id) => updateMultiplayerPlayer(this.mp.code, id, reset)))
-          .then(() => updateMultiplayerRoom(this.mp.code, { status: 'playing', winner: null, rematch: {} }))
+        void startMultiplayerRematch(this.mp.code)
+          .catch(() => this.setMpStatus('Não foi possível preparar a revanche.'))
           .finally(() => { this.mp.rematchStarting = false; });
       }
     }
@@ -1169,13 +1249,62 @@ class Game {
   makeRemoteCart(playerId, seat) {
     let cart = this.remoteCarts.get(playerId);
     if (cart) return cart;
-    const colors = [COLORS.orange, COLORS.mint, COLORS.lilac, COLORS.yellow, COLORS.coral, COLORS.blue];
+    const colors = [0xe84e5b, 0x34a76d, 0xf1a928, 0x875bd1, 0x00a5a5, 0x2788d3];
     cart = new Cart();
-    cart.proceduralNose.material = material(colors[seat % colors.length], .44, .03);
+    const color = colors[seat % colors.length];
+    cart.multiplayerColor = color;
+    cart.riderJersey.color.setHex(color);
+    cart.riderHelmetAccent.color.setHex(color);
+    cart.proceduralNose.material.color.setHex(color);
     cart.shadow.material = new THREE.MeshBasicMaterial({ color: 0x5a3226, transparent: true, opacity: .19, depthWrite: false });
+    if (this.multiplayerCartModel) this.installMultiplayerCartModel(cart);
     this.scene.add(cart.group);
     this.remoteCarts.set(playerId, cart);
     return cart;
+  }
+  setMultiplayerCartModel(model, size, scale) {
+    this.multiplayerCartModel = { model, size: size.clone(), scale };
+    for (const cart of this.remoteCarts.values()) this.installMultiplayerCartModel(cart);
+  }
+  installMultiplayerCartModel(cart) {
+    if (!this.multiplayerCartModel || cart.group.userData.hasMultiplayerCartModel) return;
+    const { model, size, scale } = this.multiplayerCartModel;
+    cart.proceduralBasket.visible = false; cart.proceduralFrame.visible = false; cart.proceduralNose.visible = false;
+    for (const wheel of cart.wheels) wheel.visible = false;
+    cart.handleHalfWidth = size.x * scale * .47;
+    cart.handleY = size.y * scale - .03;
+    cart.handleZ = 1.29;
+    const riderOrigin = cart.riderPivot.position.clone().add(cart.rider.position);
+    cart.riderPivot.position.set(0, cart.handleY, cart.handleZ);
+    cart.rider.position.copy(riderOrigin).sub(cart.riderPivot.position);
+    cart.riderPivotBasePosition.copy(cart.riderPivot.position);
+    const clone = model.clone(true);
+    clone.name = 'modelo-carro-multiplayer';
+    const accent = new THREE.Color(cart.multiplayerColor ?? 0x34a76d);
+    clone.traverse((object) => {
+      if (!object.isMesh) return;
+      const tint = (source) => {
+        const copy = source.clone();
+        if (copy.color) copy.color.lerp(accent, .28);
+        return copy;
+      };
+      object.material = Array.isArray(object.material) ? object.material.map(tint) : tint(object.material);
+    });
+    cart.reaction.add(clone);
+    cart.group.userData.hasMultiplayerCartModel = true;
+  }
+  setMultiplayerRiderModel(model) {
+    this.multiplayerRiderModel = model;
+    for (const cart of this.remoteCarts.values()) this.installMultiplayerRiderModel(cart);
+  }
+  installMultiplayerRiderModel(cart) {
+    if (!this.multiplayerRiderModel || cart.group.userData.hasMultiplayerRiderModel) return;
+    for (const part of cart.proceduralRiderParts) part.visible = false;
+    const rider = this.multiplayerRiderModel.clone(true);
+    rider.name = 'modelo-personagem-multiplayer';
+    cart.rider.add(rider);
+    this.assets.poseRiderOnCart(rider, cart);
+    cart.group.userData.hasMultiplayerRiderModel = true;
   }
   startMultiplayer() {
     if (this.phase === 'mp-playing') return;
@@ -1260,8 +1389,9 @@ class Game {
       const bestScore = Math.max(...this.mp.players.map((player) => Number(player.score) || 0));
       const winners = this.mp.players.filter((player) => (Number(player.score) || 0) === bestScore);
       const winner = winners.length === 1 ? winners[0].id : 'draw';
-      void updateMultiplayerRoom(this.mp.code, { status: 'finished', winner });
-      trackFirebaseEvent('mp_match_end', { winner, reason: 'all-finished' });
+      void finishMultiplayerRoom(this.mp.code, winner).then((finished) => {
+        if (finished) trackFirebaseEvent('mp_match_end', { winner, reason: 'all-finished' });
+      });
     }
   }
   async finishMultiplayer(reason, roomGone = false) {
@@ -1311,8 +1441,12 @@ class Game {
   requestRematch() {
     this.audio.play('click');
     if (!this.mp.code) return;
-    ui.mpRematchStatus.textContent = 'Aguardando os outros participantes…';
-    updateMultiplayerRoom(this.mp.code, { rematch: { [this.mp.playerId]: true } });
+    ui.mpRematch.disabled = true;
+    ui.mpRematchStatus.textContent = 'Registrando sua confirmação…';
+    void requestMultiplayerRematch(this.mp.code, this.mp.playerId)
+      .then(() => { ui.mpRematchStatus.textContent = 'Aguardando os outros participantes…'; })
+      .catch(() => { ui.mpRematchStatus.textContent = 'A sala não está mais disponível.'; })
+      .finally(() => { ui.mpRematch.disabled = false; });
   }
   leaveRoom(silent = false) {
     if (this.mp.code) void leaveMultiplayerRoom(this.mp.code, this.mp.role, this.mp.playerId);

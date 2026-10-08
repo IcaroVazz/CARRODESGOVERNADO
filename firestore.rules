@@ -69,7 +69,7 @@ service cloud.firestore {
           'createdAt', 'status', 'hostId', 'playerIds', 'winner', 'rematch'
         ])
         && data.createdAt is timestamp
-        && data.status in ['waiting', 'playing', 'finished']
+        && data.status in ['waiting', 'playing', 'finished', 'closed']
         && data.hostId is string
         && data.playerIds is list
         && data.playerIds.size() >= 1

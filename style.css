@@ -222,20 +222,24 @@ button { color: inherit; font: inherit; }
 .mp-button { margin-top: 10px; background: #173957; box-shadow: 0 7px 0 #0d2338, 0 16px 30px rgba(13,35,56,.28); }
 .mp-button:hover { background: #24577d; box-shadow: 0 9px 0 #0d2338, 0 18px 34px rgba(13,35,56,.3); }
 .mp-button:active { box-shadow: 0 3px 0 #0d2338; }
-.mp-overlay { display: grid; place-items: center; background: linear-gradient(90deg, rgba(239,248,255,.96) 0%, rgba(239,248,255,.88) 60%, rgba(222,241,254,.5)); padding: 100px 6vw 60px; }
+.mp-overlay { display: grid; place-items: center; overflow: auto; background: linear-gradient(90deg, rgba(239,248,255,.96) 0%, rgba(239,248,255,.88) 60%, rgba(222,241,254,.5)); padding: 100px 6vw 60px; }
 .mp-card { width: min(430px, 92vw); background: rgba(255,255,255,.85); border: 1px solid rgba(23,57,87,.14); border-radius: 18px; padding: 30px 28px 24px; box-shadow: 0 24px 60px rgba(23,57,87,.18); backdrop-filter: blur(8px); text-align: center; }
 .mp-card h2 { margin: 10px 0 18px; font-size: 40px; line-height: .95; letter-spacing: -1px; color: #173957; }
 .mp-card h2 span { color: #2788d3; }
+.mp-intro { margin: -6px 0 20px; color: #60736b; font-size: 13px; line-height: 1.5; }
 .mp-actions { display: grid; gap: 12px; margin-bottom: 14px; }
 .mp-actions .primary-button { width: 100%; }
 .mp-code-block { margin: 14px 0 6px; padding: 16px; border: 1px dashed rgba(23,57,87,.3); border-radius: 12px; background: rgba(240,248,255,.7); }
 .mp-code { display: block; margin: 6px 0; font: 700 34px var(--mono); letter-spacing: 8px; color: #173957; }
 .mp-code-block small { color: #60736b; font-size: 11px; }
+.mp-copy { display: block; margin: 12px auto 0; padding: 8px 12px; border: 1px solid rgba(23,57,87,.24); border-radius: 7px; background: rgba(255,255,255,.8); font: 9px var(--mono); letter-spacing: .08em; cursor: pointer; }
+.mp-copy:hover { background: #fff; }
 .mp-join-block { margin: 14px 0 6px; display: grid; gap: 10px; }
 .mp-join-block.is-hidden { display: none; }
 #mp-code-input { padding: 12px; border: 1px solid rgba(23,57,87,.25); border-radius: 10px; font: 700 22px var(--mono); letter-spacing: 6px; text-align: center; text-transform: uppercase; color: #173957; background: #fff; }
 .mp-join-block .primary-button { width: 100%; }
 .mp-status { min-height: 18px; margin: 12px 0 4px; font: 10px var(--mono); letter-spacing: 1px; color: #60736b; text-transform: uppercase; }
+.mp-status.is-error { max-width: 370px; margin: 12px auto 4px; color: #b5323e; line-height: 1.55; overflow-wrap: anywhere; }
 .mp-players { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 10px 0 16px; font: 8px var(--mono); letter-spacing: .06em; color: #173957; }
 .mp-players span { min-width: 0; padding: 8px 5px; overflow: hidden; border-radius: 8px; background: rgba(39,136,211,.12); text-overflow: ellipsis; white-space: nowrap; }
 .mp-players span.is-empty { opacity: .45; }
@@ -256,8 +260,13 @@ button { color: inherit; font: inherit; }
 #mp-rematch-status { margin-top: 8px; }
 @media (max-width: 520px) {
   .mp-card h2 { font-size: 32px; }
+  .mp-card { padding: 24px 20px 20px; }
   .mp-score { top: 190px; right: 8px; width: 140px; }
   #mp-result .gameover-card { padding: 24px 20px 20px; }
   .mp-results { gap: 5px; }
   .mp-result-player { padding: 7px 5px; font-size: 7px; }
+}
+@media (max-height: 650px) {
+  .mp-overlay { padding-top: 88px; padding-bottom: 28px; }
+  .mp-card { padding-top: 21px; padding-bottom: 18px; }
 }

@@ -16,10 +16,11 @@ Depois abra `http://localhost:8000` no navegador. A página usa módulos JavaScr
 
 O multiplayer usa salas do Cloud Firestore e não exige conta nem login. Crie uma sala e compartilhe o código de seis caracteres; entram até seis jogadores, e o anfitrião inicia a corrida quando houver pelo menos dois. Cada participante aparece na pista e no placar. A corrida termina quando todos forem eliminados ou perderem a conexão.
 
-Para habilitar salas sem autenticação, publique as regras incluídas no projeto:
+Para habilitar salas sem autenticação, entre no CLI com uma conta que administra o projeto e publique as regras incluídas. Esse login serve só para configurar o Firebase; os jogadores continuam sem login:
 
 ```powershell
-npx firebase deploy --only firestore:rules
+npx.cmd firebase login
+npx.cmd firebase deploy --only firestore:rules
 ```
 
 As regras permitem leitura e escrita pública apenas para os dados das salas multiplayer. Os IDs dos participantes ficam na sessão do navegador e não representam contas autenticadas. Como não há autenticação, qualquer pessoa com o código da sala pode alterar os dados daquela partida; use esse modo para corridas casuais, sem placar confiável contra trapaças.
@@ -34,7 +35,7 @@ As regras permitem leitura e escrita pública apenas para os dados das salas mul
 
 ## Modelos 3D e cenário
 
-O carrinho usa o modelo existente em `3DMODELS/` e o personagem é procedural (regata preta, calça preta, tênis branco e capacete com faixa vermelha). Os obstáculos usam `caixa.glb`, `feno.glb` e `pedra.glb`, ajustados para a pista. As laterais têm casas e prédios procedurais em Three.js, apoiados em terreno contínuo e reciclados com os segmentos da estrada.
+O carrinho e o piloto usam os modelos existentes em `3DMODELS/`; se o modelo do piloto não carregar, o jogo usa um personagem procedural com roupa colorida. Os obstáculos usam `caixa.glb`, `feno.glb` e `pedra.glb`, ajustados para a pista. As laterais têm casas e prédios procedurais em Three.js, apoiados em terreno contínuo e reciclados com os segmentos da estrada.
 
 - **PSX shopping cart** — zynxeror, [Sketchfab](https://sketchfab.com/3d-models/psx-shopping-cart-96534b56f0d9487db08f00f1f9301fa1)
 

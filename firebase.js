@@ -194,6 +194,62 @@ export async function joinMultiplayerRoom(rawCode) {
   });
 }
 
+export async function startMultiplayerRoom(code, hostId) {
+  const roomRef = doc(db, 'rooms', code);
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists()) throw new Error('not-found');
+    const room = snapshot.data();
+    if (room.hostId !== hostId) throw new Error('not-host');
+    if (room.status !== 'waiting') throw new Error('unavailable');
+    if ((room.playerIds || []).length < 2) throw new Error('need-players');
+    transaction.update(roomRef, { status: 'playing', winner: null, rematch: {} });
+    return true;
+  });
+}
+
+export async function requestMultiplayerRematch(code, playerId) {
+  const roomRef = doc(db, 'rooms', code);
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists()) throw new Error('not-found');
+    const room = snapshot.data();
+    if (room.status !== 'finished' || !(room.playerIds || []).includes(playerId)) throw new Error('unavailable');
+    transaction.update(roomRef, { rematch: { ...(room.rematch || {}), [playerId]: true } });
+    return true;
+  });
+}
+
+export async function startMultiplayerRematch(code) {
+  const roomRef = doc(db, 'rooms', code);
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists()) throw new Error('not-found');
+    const room = snapshot.data();
+    const playerIds = room.playerIds || [];
+    if (room.status !== 'finished') return false;
+    if (playerIds.length < 2 || !playerIds.every((id) => room.rematch?.[id])) return false;
+    const playerRefs = playerIds.map((id) => doc(db, 'rooms', code, 'players', id));
+    const playerSnapshots = await Promise.all(playerRefs.map((playerRef) => transaction.get(playerRef)));
+    if (playerSnapshots.some((player) => !player.exists())) throw new Error('unavailable');
+    playerRefs.forEach((playerRef) => transaction.set(playerRef, {
+      ready: true, x: 0, distance: 0, speed: 0, score: 0, alive: true, ping: serverTimestamp(),
+    }, { merge: true }));
+    transaction.update(roomRef, { status: 'playing', winner: null, rematch: {} });
+    return true;
+  });
+}
+
+export async function finishMultiplayerRoom(code, winner) {
+  const roomRef = doc(db, 'rooms', code);
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists() || snapshot.data().status !== 'playing') return false;
+    transaction.update(roomRef, { status: 'finished', winner, rematch: {} });
+    return true;
+  });
+}
+
 export function listenMultiplayerRoom(code, callback) {
   let room = null;
   let players = [];
@@ -221,18 +277,14 @@ export async function updateMultiplayerPlayer(code, playerId, state) {
   }
 }
 
-export async function updateMultiplayerRoom(code, fields) {
-  try {
-    await setDoc(doc(db, 'rooms', code), fields, { merge: true });
-  } catch (error) {
-    console.debug('Atualização da sala ignorada.', error);
-  }
-}
-
 export async function leaveMultiplayerRoom(code, role, participantId = multiplayerPlayerId()) {
   try {
     const roomRef = doc(db, 'rooms', code);
     if (role === 'host') {
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(roomRef);
+        if (snapshot.exists()) transaction.update(roomRef, { status: 'closed', winner: null, rematch: {} });
+      });
       const playerSnapshot = await getDocs(collection(db, 'rooms', code, 'players'));
       const batch = writeBatch(db);
       playerSnapshot.docs.forEach((player) => batch.delete(player.ref));
@@ -244,6 +296,12 @@ export async function leaveMultiplayerRoom(code, role, participantId = multiplay
       const snapshot = await transaction.get(roomRef);
       if (!snapshot.exists()) return;
       const room = snapshot.data();
+      if (room.status === 'closed') return;
+      const playerRef = doc(db, 'rooms', code, 'players', participantId);
+      if (room.status === 'playing') {
+        transaction.set(playerRef, { ready: true, alive: false, ping: serverTimestamp() }, { merge: true });
+        return;
+      }
       const playerIds = (room.playerIds || []).filter((id) => id !== participantId);
       transaction.update(roomRef, { playerIds, rematch: {} });
       if (room.status !== 'finished') transaction.delete(doc(db, 'rooms', code, 'players', participantId));
