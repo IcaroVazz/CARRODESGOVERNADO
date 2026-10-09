@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import {
   createMultiplayerRoom,
   finishMultiplayerRoom,
@@ -751,12 +752,12 @@ class ParticleSystem {
 
 class AssetManager {
   constructor(game) {
-    this.game = game; this.loader = new GLTFLoader(); this.cartLoaded = true;
+    this.game = game; this.loader = new GLTFLoader(); this.loader.setMeshoptDecoder(MeshoptDecoder); this.cartLoaded = true;
     this.riderPoseCache = new WeakMap();
     this.loadMainCharacter(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadMainCharacter() {
-    const url = new URL('./3DMODELS/fast_boy_in_quill.glb?v=20261009-compact-1', import.meta.url).href;
+    const url = new URL('./3DMODELS/fast_boy_in_quill.glb?v=20261009-meshopt-1', import.meta.url).href;
     this.loader.load(url, (gltf) => {
       const character = gltf.scene;
       const bounds = new THREE.Box3().setFromObject(character);
