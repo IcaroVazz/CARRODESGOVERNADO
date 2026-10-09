@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import {
   createMultiplayerRoom,
@@ -65,9 +64,7 @@ const ui = {
   mpWinnerLine: $('mp-winner-line'), mpRematch: $('mp-rematch'), mpExit: $('mp-exit'), mpRematchStatus: $('mp-rematch-status'),
   mpScore: $('mp-score'), mpScorePlayers: $('mp-score-players'),
   characterLoading: $('character-loading'), characterLoadingTitle: $('character-loading-title'),
-  characterLoadingMessage: $('character-loading-message'), characterProgressTrack: $('character-progress-track'),
-  characterProgress: $('character-progress'), characterProgressText: $('character-progress-text'),
-  characterProgressDetail: $('character-progress-detail'), characterRetry: $('character-retry'),
+  characterLoadingMessage: $('character-loading-message'), characterRetry: $('character-retry'),
 };
 
 class AudioManager {
@@ -605,38 +602,6 @@ function installCharacterModel(cart, characterAsset, name) {
   cart.group.userData.hasMainCharacter = true;
 }
 
-function removeCharacterTrackSurface(character) {
-  character.traverse((object) => {
-    if (!object.isMesh || !/^Gordin_baked_\d{4}$/.test(object.name)) return;
-    const geometry = object.geometry;
-    const position = geometry.getAttribute('position');
-    const [trackGroup, ...characterGroups] = geometry.groups;
-    if (!position || trackGroup?.materialIndex !== 1 || trackGroup.count > 600) return;
-
-    const trackBounds = new THREE.Box3();
-    const point = new THREE.Vector3();
-    for (let i = trackGroup.start; i < trackGroup.start + trackGroup.count; i++) {
-      trackBounds.expandByPoint(point.set(position.getX(i), position.getY(i), position.getZ(i)));
-    }
-    const trackSize = trackBounds.getSize(new THREE.Vector3());
-    if (trackSize.x < 18 || trackSize.z < 50) return;
-
-    const bounds = new THREE.Box3(
-      new THREE.Vector3(Infinity, Infinity, Infinity),
-      new THREE.Vector3(-Infinity, -Infinity, -Infinity),
-    );
-    for (const group of characterGroups) {
-      for (let i = group.start; i < group.start + group.count; i++) {
-        bounds.expandByPoint(point.set(position.getX(i), position.getY(i), position.getZ(i)));
-      }
-    }
-    geometry.clearGroups();
-    for (const group of characterGroups) geometry.addGroup(group.start, group.count, group.materialIndex);
-    geometry.boundingBox = bounds;
-    geometry.boundingSphere = new THREE.Sphere().setFromBox3(bounds);
-  });
-}
-
 class ObstacleManager {
   constructor(world, hooks) {
     this.world = world; this.hooks = hooks; this.entities = []; this.distanceToObstacle = 72; this.distanceToCoins = 27;
@@ -796,20 +761,19 @@ class ParticleSystem {
 
 class AssetManager {
   constructor(game) {
-    this.game = game; this.loader = new GLTFLoader(); this.loader.setMeshoptDecoder(MeshoptDecoder); this.fbxLoader = new FBXLoader(); this.cartLoaded = true;
+    this.game = game; this.loader = new GLTFLoader(); this.loader.setMeshoptDecoder(MeshoptDecoder); this.cartLoaded = true;
     this.riderPoseCache = new WeakMap();
     this.characterLoadAttempt = 0;
     this.loadMainCharacter(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadMainCharacter() {
-    const url = new URL('./3DMODELS/fast_boy_in_quill.fbx', import.meta.url);
-    url.searchParams.set('v', '20261009-fbx-progress-screen-1');
+    const url = new URL('./3DMODELS/fast_boy_in_quill.glb', import.meta.url);
+    url.searchParams.set('v', '20261009-meshopt-fast-1');
     url.searchParams.set('attempt', String(this.characterLoadAttempt));
-    this.game.setCharacterDownloadProgress(0, 0);
-    this.fbxLoader.load(url.href, (character) => {
-      this.game.setCharacterDownloadComplete();
+    this.game.characterLoadStarted();
+    this.loader.load(url.href, (gltf) => {
+      const character = gltf.scene;
       try {
-        removeCharacterTrackSurface(character);
         const bounds = new THREE.Box3().setFromObject(character);
         const size = bounds.getSize(new THREE.Vector3());
         const center = bounds.getCenter(new THREE.Vector3());
@@ -819,19 +783,17 @@ class AssetManager {
         character.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
         character.rotation.y = Math.PI;
         character.name = 'modelo-fast-boy-in-quill';
-        const characterAsset = { scene: character, animations: [{ duration: 2 / 3 }] };
+        const characterAsset = { scene: character, animations: gltf.animations || [] };
         this.game.characterAsset = characterAsset;
         installCharacterModel(this.game.cart, characterAsset, 'personagem-principal-fast-boy');
         this.game.setMultiplayerCharacterModel(characterAsset);
         this.game.characterLoadReady();
       } catch (error) {
-        console.warn('Não foi possível preparar fast_boy_in_quill.fbx.', error);
+        console.warn('Não foi possível preparar fast_boy_in_quill.glb.', error);
         this.game.characterLoadFailed();
       }
-    }, (event) => {
-      this.game.setCharacterDownloadProgress(event.loaded, event.total);
     }, (error) => {
-      console.warn('Não foi possível baixar fast_boy_in_quill.fbx.', error);
+      console.warn('Não foi possível carregar fast_boy_in_quill.glb.', error);
       this.game.characterLoadFailed();
     });
   }
@@ -1082,50 +1044,20 @@ class Game {
     ui.best.textContent = `${number(this.meterRecords)} m`; ui.run.textContent = String(this.runCount + 1).padStart(3, '0');
     ui.hints.classList.add('is-hidden'); ui.bottomline.classList.add('is-hidden'); ui.mobileControls.classList.add('is-hidden');
   }
-  setCharacterDownloadProgress(loaded, total) {
-    ui.characterLoading.hidden = false;
-    ui.characterRetry.hidden = true;
-    ui.characterLoading.classList.remove('is-indeterminate');
-    const hasTotal = Number.isFinite(total) && total > 0;
-    const downloadedMb = (Math.max(0, loaded || 0) / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
-    if (hasTotal) {
-      const percent = clamp((loaded / total) * 100, 0, 100);
-      const totalMb = (total / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
-      ui.characterLoadingTitle.textContent = percent >= 100 ? 'Preparando seu personagem' : 'Baixando seu personagem';
-      ui.characterLoadingMessage.textContent = percent >= 100
-        ? 'Download concluído. Finalizando o modelo para liberar o jogo.'
-        : 'Aguarde o download terminar para começar a corrida.';
-      ui.characterProgress.style.width = `${percent}%`;
-      ui.characterProgressTrack.setAttribute('aria-valuenow', String(Math.round(percent)));
-      ui.characterProgressText.textContent = `${Math.round(percent)}%`;
-      ui.characterProgressDetail.textContent = `${downloadedMb} MB de ${totalMb} MB`;
-    } else {
-      ui.characterLoadingTitle.textContent = 'Baixando seu personagem';
-      ui.characterLoadingMessage.textContent = 'Recebendo o modelo. O progresso total depende do servidor.';
-      ui.characterLoading.classList.add('is-indeterminate');
-      ui.characterProgressTrack.removeAttribute('aria-valuenow');
-      ui.characterProgressText.textContent = 'BAIXANDO';
-      ui.characterProgressDetail.textContent = `${downloadedMb} MB recebidos`;
-    }
-  }
-  setCharacterDownloadComplete() {
-    ui.characterLoadingTitle.textContent = 'Preparando seu personagem';
-    ui.characterLoadingMessage.textContent = 'Download concluído. Finalizando o modelo para liberar o jogo.';
-    ui.characterLoading.classList.remove('is-indeterminate');
-    ui.characterProgress.style.width = '100%';
-    ui.characterProgressTrack.setAttribute('aria-valuenow', '100');
-    ui.characterProgressText.textContent = '100%';
-    ui.characterProgressDetail.textContent = 'Download concluído';
-  }
   characterLoadFailed() {
     this.characterReady = false;
     ui.characterLoading.hidden = false;
-    ui.characterLoading.classList.remove('is-indeterminate');
+    ui.characterLoading.classList.add('is-error');
     ui.characterLoadingTitle.textContent = 'Não foi possível carregar o personagem';
-    ui.characterLoadingMessage.textContent = 'Confira sua conexão e tente baixar o personagem novamente.';
-    ui.characterProgressText.textContent = 'DOWNLOAD COM FALHA';
-    ui.characterProgressDetail.textContent = 'O jogo permanece bloqueado até o modelo carregar.';
+    ui.characterLoadingMessage.textContent = 'Confira sua conexão e tente novamente.';
     ui.characterRetry.hidden = false;
+  }
+  characterLoadStarted() {
+    ui.characterLoading.hidden = false;
+    ui.characterLoading.classList.remove('is-error');
+    ui.characterLoadingTitle.textContent = 'Preparando seu personagem';
+    ui.characterLoadingMessage.textContent = 'Aguarde um instante para iniciar a corrida.';
+    ui.characterRetry.hidden = true;
   }
   characterLoadReady() {
     this.characterReady = true;

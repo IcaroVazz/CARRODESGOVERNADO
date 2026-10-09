@@ -11,6 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="style.css" />
+    <link rel="preload" href="3DMODELS/fast_boy_in_quill.glb?v=20261009-meshopt-fast-1&amp;attempt=0" as="fetch" crossorigin="anonymous" fetchpriority="high" />
     <script type="importmap">
       {
         "imports": {
@@ -23,7 +24,7 @@
         }
       }
     </script>
-    <script type="module" src="main.js?v=20261009-fbx-progress-screen-1"></script>
+    <script type="module" src="main.js?v=20261009-meshopt-fast-1"></script>
   </head>
   <body>
     <main id="game" aria-label="Carrinho de Supermercado Desgovernado">
@@ -162,12 +163,9 @@
       <section class="character-loading" id="character-loading" role="dialog" aria-modal="true" aria-labelledby="character-loading-title" aria-live="polite">
         <div class="character-loading-card">
           <span class="kicker"><i></i> PREPARANDO A CORRIDA</span>
-          <h2 id="character-loading-title">Baixando seu personagem</h2>
-          <p id="character-loading-message">Aguarde enquanto carregamos o modelo para iniciar.</p>
-          <div class="character-progress-track" id="character-progress-track" role="progressbar" aria-label="Download do personagem" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <span class="character-progress-fill" id="character-progress"></span>
-          </div>
-          <div class="character-progress-copy"><strong id="character-progress-text">0%</strong><span id="character-progress-detail">Conectando ao servidor…</span></div>
+          <h2 id="character-loading-title">Preparando seu personagem</h2>
+          <p id="character-loading-message">Aguarde um instante para iniciar a corrida.</p>
+          <div class="character-loading-spinner" aria-hidden="true"></div>
           <button class="primary-button character-retry" id="character-retry" type="button" hidden><span>TENTAR NOVAMENTE</span><b>↻</b></button>
         </div>
       </section>

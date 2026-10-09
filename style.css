@@ -108,12 +108,9 @@ button { color: inherit; font: inherit; }
 .character-loading-card .kicker { font-size: 8px; }
 .character-loading-card h2 { margin: 24px 0 9px; font-size: clamp(27px, 5vw, 39px); line-height: 1; letter-spacing: -.06em; }
 .character-loading-card > p { min-height: 40px; margin: 0 0 24px; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.character-progress-track { height: 10px; overflow: hidden; background: rgba(23,57,87,.12); border-radius: 99px; }
-.character-progress-fill { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #2788d3, #55bce2); border-radius: inherit; transition: width .15s ease; }
-.character-loading.is-indeterminate .character-progress-fill { width: 34%; animation: character-progress-sweep 1.15s ease-in-out infinite alternate; }
-@keyframes character-progress-sweep { from { transform: translateX(-12%); } to { transform: translateX(210%); } }
-.character-progress-copy { display: flex; justify-content: space-between; gap: 16px; margin-top: 11px; font: 9px var(--mono); letter-spacing: .04em; color: var(--muted); }
-.character-progress-copy strong { color: var(--orange); font-size: 12px; font-variant-numeric: tabular-nums; }
+.character-loading-spinner { width: 36px; height: 36px; margin: 0 auto; border: 3px solid rgba(23,57,87,.12); border-top-color: var(--orange); border-radius: 50%; animation: character-spinner .75s linear infinite; }
+.character-loading.is-error .character-loading-spinner { display: none; }
+@keyframes character-spinner { to { transform: rotate(360deg); } }
 .character-retry { width: 100%; margin-top: 25px; }
 .character-retry[hidden] { display: none; }
 .gameover-overlay { display: grid; place-items: center; background: rgba(15,43,69,.74); backdrop-filter: blur(5px); }
