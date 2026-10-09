@@ -792,7 +792,7 @@ class AssetManager {
         console.warn('Não foi possível preparar fast_boy_in_quill.glb.', error);
         this.game.characterLoadFailed();
       }
-    }, (error) => {
+    }, undefined, (error) => {
       console.warn('Não foi possível carregar fast_boy_in_quill.glb.', error);
       this.game.characterLoadFailed();
     });
