@@ -318,7 +318,7 @@ export async function leaveMultiplayerRoom(code, role, participantId = multiplay
       if (room.status !== 'finished') transaction.delete(doc(db, 'rooms', code, 'players', participantId));
     });
   } catch (error) {
-    console.debug('Saída da sala ignorada.', error);
+    console.debug('Saída da sala ignorada.',  error);
   }
 }
 
