@@ -677,7 +677,8 @@ class ObstacleManager {
     const lane = THREE.MathUtils.randInt(0, 2);
     const x = laneX[lane];
     const treat = Math.random() < .25;
-    const kind = treat ? choose(['burger', 'soda', 'coffee', 'coupon', 'chips', 'cash']) : 'coin';
+    const scoringBoosters = ['coupon', 'cash'];
+    const kind = treat ? choose(scoringBoosters) : 'coin';
     const count = treat ? 1 : THREE.MathUtils.randInt(3, 5);
     const spacing = 4.1;
     for (let i = 0; i < count; i++) this.addPickup(kind, x, -94 - i * spacing);
