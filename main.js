@@ -756,7 +756,7 @@ class AssetManager {
     this.loadMainCharacter(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadMainCharacter() {
-    const url = new URL('./3DMODELS/fast_boy_in_quill.glb', import.meta.url).href;
+    const url = new URL('./3DMODELS/fast_boy_in_quill.glb?v=20261009-compact-1', import.meta.url).href;
     this.loader.load(url, (gltf) => {
       const character = gltf.scene;
       const bounds = new THREE.Box3().setFromObject(character);
