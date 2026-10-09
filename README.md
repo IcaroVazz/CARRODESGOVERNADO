@@ -41,7 +41,9 @@ As coleções são criadas automaticamente pelo Firestore quando o primeiro docu
 
 ## Modelos 3D e cenário
 
-O carrinho e o piloto usam os modelos existentes em `3DMODELS/`; se o modelo do piloto não carregar, o jogo usa um personagem procedural com roupa colorida. Os obstáculos usam `caixa.glb`, `feno.glb` e `pedra.glb`, ajustados para a pista. As laterais têm casas e prédios procedurais em Three.js, apoiados em terreno contínuo e reciclados com os segmentos da estrada.
+O personagem principal e todos os participantes do modo online usam `fast_boy_in_quill.glb`, com a animação incluída no modelo. Obstáculos e itens usam os modelos de `3DMODELS/`, ajustados para a pista. As laterais têm casas e prédios procedurais em Three.js, apoiados em terreno contínuo e reciclados com os segmentos da estrada.
+
+- **Fast Boy in Quill** — Allen.Michael, [Sketchfab](https://sketchfab.com/3d-models/fast-boy-in-quill-d2850f50920e44889ada8053eef90b09), sob licença [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 - **PSX shopping cart** — zynxeror, [Sketchfab](https://sketchfab.com/3d-models/psx-shopping-cart-96534b56f0d9487db08f00f1f9301fa1)
 

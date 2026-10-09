@@ -460,8 +460,9 @@ class Cart {
   buildRider(procedural = true) {
     const riderPivot = new THREE.Group(); riderPivot.position.set(0, this.handleY, this.handleZ); this.reaction.add(riderPivot);
     const rider = new THREE.Group();
-    rider.position.set(.16, .10 - this.handleY, 2.42 - this.handleZ);
-    rider.rotation.x = -.68;
+    rider.position.set(0, .10 - this.handleY, 2.42 - this.handleZ);
+    rider.rotation.x = .25;
+    this.riderBaseRotation = rider.rotation.clone();
     rider.scale.setScalar(1.08);
     riderPivot.add(rider);
 
@@ -548,8 +549,53 @@ class Cart {
       this.riderBaseScale.y * (1 + squash * .026),
       this.riderBaseScale.z * (1 - squash * .014),
     );
+    if (this.characterFrames?.length) {
+      const loopDuration = this.characterFrameDuration * this.characterFrames.length;
+      this.characterFrameTime = (this.characterFrameTime + dt) % loopDuration;
+      const nextFrame = Math.floor(this.characterFrameTime / this.characterFrameDuration);
+      if (nextFrame !== this.characterFrameIndex) {
+        this.characterFrames[this.characterFrameIndex].visible = false;
+        this.characterFrames[nextFrame].visible = true;
+        this.characterFrameIndex = nextFrame;
+      }
+    } else {
+      this.characterMixer?.update(dt);
+    }
     if (this.updateRiderPose) this.updateRiderPose();
   }
+}
+
+function installCharacterModel(cart, characterAsset, name) {
+  if (!characterAsset || cart.group.userData.hasMainCharacter) return;
+  const character = characterAsset.scene.clone(true);
+  character.name = name;
+  character.traverse((object) => {
+    if (!object.isMesh) return;
+    if (object.name.endsWith('_Gordin_baked_double_0')) object.visible = false;
+    object.castShadow = false; object.receiveShadow = false;
+  });
+  const frameGroups = [];
+  character.traverse((object) => {
+    const match = object.name.match(/^Gordin_baked_(\d{4})$/);
+    if (match) frameGroups.push({ index: Number(match[1]), object });
+  });
+  frameGroups.sort((a, b) => a.index - b.index);
+  if (frameGroups.length > 1 && characterAsset.animations[0]) {
+    // The export includes a closing snapshot at the clip boundary. Display
+    // the preceding baked frames discretely so the character never fades out.
+    cart.characterFrames = frameGroups.slice(0, -1).map(({ object }) => object);
+    cart.characterFrameDuration = characterAsset.animations[0].duration / cart.characterFrames.length;
+    cart.characterFrameTime = 0;
+    cart.characterFrameIndex = 0;
+    frameGroups.forEach(({ object }, index) => { object.visible = index === 0; });
+  } else {
+    const mixer = new THREE.AnimationMixer(character);
+    for (const clip of characterAsset.animations) mixer.clipAction(clip).play();
+    cart.characterMixer = mixer;
+  }
+  cart.group.add(character);
+  cart.characterModel = character;
+  cart.group.userData.hasMainCharacter = true;
 }
 
 class ObstacleManager {
@@ -707,7 +753,29 @@ class AssetManager {
   constructor(game) {
     this.game = game; this.loader = new GLTFLoader(); this.cartLoaded = true;
     this.riderPoseCache = new WeakMap();
-    this.loadCart(); this.loadRider(); this.loadObstacleModels(); this.loadPickupModels();
+    this.loadMainCharacter(); this.loadObstacleModels(); this.loadPickupModels();
+  }
+  loadMainCharacter() {
+    const url = new URL('./3DMODELS/fast_boy_in_quill.glb', import.meta.url).href;
+    this.loader.load(url, (gltf) => {
+      const character = gltf.scene;
+      const bounds = new THREE.Box3().setFromObject(character);
+      const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      if (!Number.isFinite(size.y) || size.y <= 0) {
+        console.warn('O modelo do personagem principal não tem dimensões válidas.');
+        return;
+      }
+      const scale = 2.35 / size.y;
+      character.scale.setScalar(scale);
+      character.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+      character.rotation.y = Math.PI;
+      character.name = 'modelo-fast-boy-in-quill';
+      const characterAsset = { scene: character, animations: gltf.animations || [] };
+      this.game.characterAsset = characterAsset;
+      installCharacterModel(this.game.cart, characterAsset, 'personagem-principal-fast-boy');
+      this.game.setMultiplayerCharacterModel(characterAsset);
+    }, undefined, (error) => console.warn('Não foi possível carregar fast_boy_in_quill.glb.', error));
   }
   loadPickupModels() {
     const specs = [
@@ -770,150 +838,6 @@ class AssetManager {
       }, undefined, (error) => console.warn(`Modelo de obstáculo ${spec.file} indisponível.`, error));
     }
   }
-  loadCart() {
-    const url = new URL('./3DMODELS/CarroSupermarket.glb', import.meta.url).href;
-    this.loader.load(url, (gltf) => {
-      const model = gltf.scene; model.rotation.y = Math.PI;
-      const bounds = new THREE.Box3().setFromObject(model); const size = bounds.getSize(new THREE.Vector3());
-      const center = bounds.getCenter(new THREE.Vector3());
-      const scale = 1.35 / size.y;
-      model.scale.setScalar(scale);
-      model.position.set(-center.x * scale, -.03 - bounds.min.y * scale, 1.29 - bounds.max.z * scale);
-      model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      model.name = 'modelo-carro-supermarket'; this.game.cart.reaction.add(model);
-      this.game.cart.removeProceduralCart();
-      this.game.cart.handleHalfWidth = size.x * scale * .47;
-      this.game.cart.handleY = size.y * scale - .03;
-      this.game.cart.handleZ = 1.29;
-      const riderOrigin = this.game.cart.riderPivot.position.clone().add(this.game.cart.rider.position);
-      this.game.cart.riderPivot.position.set(0, this.game.cart.handleY, this.game.cart.handleZ);
-      this.game.cart.rider.position.copy(riderOrigin).sub(this.game.cart.riderPivot.position);
-      this.game.cart.riderPivotBasePosition.copy(this.game.cart.riderPivot.position);
-      this.game.setMultiplayerCartModel(model, size, scale);
-      this.cartLoaded = true;
-      if (this.localRiderModel) {
-        this.poseRiderOnCart(this.localRiderModel, this.game.cart);
-        this.game.setMultiplayerRiderModel(this.localRiderModel);
-      }
-    }, undefined, (error) => console.warn('Modelo do carrinho indisponível; usando o modelo integrado.', error));
-  }
-
-  loadRider() {
-    const url = new URL('./3DMODELS/stickmanFet.glb', import.meta.url).href;
-    this.loader.load(url, (gltf) => {
-      const model = gltf.scene; const bounds = new THREE.Box3().setFromObject(model); const size = bounds.getSize(new THREE.Vector3());
-      const center = bounds.getCenter(new THREE.Vector3());
-      const scale = 1.82 / (this.game.cart.rider.scale.y * size.y);
-      model.scale.setScalar(scale);
-      model.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
-      model.rotation.y = Math.PI;
-      model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      model.name = 'modelo-stickmanFet-template';
-      this.riderModel = model;
-      const localModel = model.clone(true);
-      localModel.name = 'modelo-stickmanFet';
-      for (const part of this.game.cart.proceduralRiderParts) part.visible = false;
-      this.game.cart.rider.add(localModel);
-      this.localRiderModel = localModel;
-      this.game.cart.updateRiderPose = null;
-      this.poseRiderOnCart(localModel, this.game.cart);
-      this.game.cart.removeProceduralRider();
-      this.game.setMultiplayerRiderModel(localModel);
-      this.riderLoaded = true;
-    }, undefined, (error) => console.warn('Modelo do personagem indisponível; usando o personagem integrado.', error));
-  }
-  poseRiderOnCart(model, cart = this.game.cart) {
-    let pose = this.riderPoseCache.get(model);
-    if (!pose) {
-      pose = { meshes: [] };
-      model.traverse((object) => {
-        if (!object.isMesh || !object.geometry?.getAttribute('position')) return;
-        object.geometry = object.geometry.clone();
-        pose.meshes.push({
-          mesh: object,
-          source: object.geometry.getAttribute('position').array.slice(),
-        });
-      });
-      this.riderPoseCache.set(model, pose);
-    }
-
-    model.updateWorldMatrix(true, true); cart.group.updateMatrixWorld(true);
-    const vertexGroups = [];
-    const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
-    for (const entry of pose.meshes) {
-      const { mesh, source } = entry;
-      const attribute = mesh.geometry.getAttribute('position');
-      attribute.array.set(source);
-      const meshToModel = modelInverse.clone().multiply(mesh.matrixWorld);
-      const modelToMesh = meshToModel.clone().invert();
-      const points = new Array(attribute.count);
-      for (let i = 0; i < attribute.count; i++) {
-        points[i] = new THREE.Vector3(source[i * 3], source[i * 3 + 1], source[i * 3 + 2]).applyMatrix4(meshToModel);
-      }
-      entry.attribute = attribute; entry.modelToMesh = modelToMesh; entry.points = points;
-      vertexGroups.push(...points.map((point, index) => ({ entry, point, index })));
-    }
-    if (!vertexGroups.length) return;
-
-    const bounds = new THREE.Box3(); vertexGroups.forEach(({ point }) => bounds.expandByPoint(point));
-    const size = bounds.getSize(new THREE.Vector3());
-    const halfWidth = Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x));
-    const height = Math.max(size.y, 1e-4);
-    const smoothstep = (edge0, edge1, value) => {
-      const t = clamp((value - edge0) / Math.max(edge1 - edge0, 1e-5), 0, 1);
-      return t * t * (3 - 2 * t);
-    };
-    const targets = [-1, 1].map((side) => {
-      const handX = clamp(cart.rider.position.x + side * .14, -cart.handleHalfWidth * .88, cart.handleHalfWidth * .88);
-      const world = cart.reaction.localToWorld(new THREE.Vector3(handX, cart.handleY + .02, cart.handleZ + .02));
-      return model.worldToLocal(world);
-    }).sort((a, b) => a.x - b.x);
-
-    for (const side of [-1, 1]) {
-      const shoulderVertices = vertexGroups.filter(({ point }) => {
-        const across = side * point.x;
-        return across > halfWidth * .15 && across < halfWidth * .36
-          && point.y > bounds.min.y + height * .49 && point.y < bounds.min.y + height * .74;
-      });
-      const handVertices = vertexGroups.filter(({ point }) => {
-        const across = side * point.x;
-        return across > halfWidth * .80
-          && point.y > bounds.min.y + height * .55 && point.y < bounds.min.y + height * .70;
-      });
-      if (!shoulderVertices.length || !handVertices.length) continue;
-
-      const average = (vertices) => vertices.reduce((sum, vertex) => sum.add(vertex.point), new THREE.Vector3()).multiplyScalar(1 / vertices.length);
-      const shoulder = average(shoulderVertices);
-      const hand = average(handVertices);
-      const target = targets.find((point) => side * point.x > 0) || targets[side > 0 ? 1 : 0];
-      const from = hand.clone().sub(shoulder);
-      const to = target.clone().sub(shoulder);
-      if (from.lengthSq() < 1e-8 || to.lengthSq() < 1e-8) continue;
-      const rotation = new THREE.Quaternion().setFromUnitVectors(from.clone().normalize(), to.clone().normalize());
-      const reachScale = clamp(to.length() / from.length(), .85, 1.18);
-
-      for (const vertex of vertexGroups) {
-        const { point, entry, index } = vertex;
-        const along = side * (point.x - shoulder.x);
-        if (along <= 0 || point.y < bounds.min.y + height * .43 || point.y > bounds.min.y + height * .78) continue;
-        const armWeight = smoothstep(.015, from.length() * .42, along);
-        const heightWeight = smoothstep(bounds.min.y + height * .43, bounds.min.y + height * .56, point.y)
-          * (1 - smoothstep(bounds.min.y + height * .71, bounds.min.y + height * .78, point.y));
-        const weight = armWeight * heightWeight;
-        if (weight < .001) continue;
-
-        const moved = point.clone().sub(shoulder).applyQuaternion(rotation).multiplyScalar(reachScale).add(shoulder);
-        moved.lerp(point, 1 - weight).applyMatrix4(entry.modelToMesh);
-        entry.attribute.setXYZ(index, moved.x, moved.y, moved.z);
-      }
-    }
-
-    for (const { mesh } of pose.meshes) {
-      mesh.geometry.getAttribute('position').needsUpdate = true;
-      mesh.geometry.computeVertexNormals();
-      mesh.geometry.computeBoundingBox(); mesh.geometry.computeBoundingSphere();
-    }
-  }
 }
 
 class Game {
@@ -936,8 +860,8 @@ class Game {
       pingSeen: new Map(), motionBuffers: new Map(), motionSignatures: new Map(),
     };
     this.remoteCarts = new Map();
-    this.multiplayerCartModel = null;
-    this.multiplayerRiderModel = null;
+    this.characterAsset = null;
+    this.multiplayerCharacterModel = null;
     this.audio = new AudioManager();
     this.setupThree();
     this.makeWorld();
@@ -992,7 +916,9 @@ class Game {
     this.terrain = new THREE.Group(); this.terrain.rotation.x = -Math.asin(slope); this.scene.add(this.terrain);
     this.dynamicWorld = new THREE.Group(); this.dynamicWorld.rotation.x = -Math.asin(slope); this.scene.add(this.dynamicWorld);
     this.track = new TrackGenerator(this.scene, () => {});
-    this.cart = new Cart(); this.cart.group.position.set(0, .11, 0); this.cart.group.traverse((o) => { if (o.isMesh) { o.castShadow = o !== this.cart.shadow; o.receiveShadow = o !== this.cart.shadow; } }); this.scene.add(this.cart.group);
+    this.cart = new Cart({ procedural: false }); this.cart.group.position.set(0, 0, 0);
+    this.cart.reaction.visible = false; this.cart.shadow.visible = false;
+    this.cart.group.traverse((o) => { if (o.isMesh) { o.castShadow = o !== this.cart.shadow; o.receiveShadow = o !== this.cart.shadow; } }); this.scene.add(this.cart.group);
     this.cameraController = new CameraController(this.camera, this.cart.group);
     this.particles = new ParticleSystem(this.scene);
     this.obstacles = new ObstacleManager(this.dynamicWorld, {
@@ -1104,8 +1030,9 @@ class Game {
     this.track.segments.forEach((segment, i) => {
       const z = SEGMENT_LENGTH / 2 - SEGMENT_LENGTH * i; segment.group.position.set(0, slope * z, z); segment.group.rotation.x = -Math.asin(slope);
     });
-    this.cart.group.position.set(0, .11, 0); this.cart.reaction.rotation.set(0, 0, 0); this.cart.rider.rotation.set(-.8, 0, 0);
+    this.cart.group.position.set(0, 0, 0); this.cart.reaction.rotation.set(0, 0, 0);
     this.cart.riderPivot.rotation.set(0, 0, 0); this.cart.riderPivot.position.copy(this.cart.riderPivotBasePosition);
+    this.cart.rider.rotation.copy(this.cart.riderBaseRotation);
     this.cart.rider.scale.copy(this.cart.riderBaseScale); this.cart.riderWobbleTime = 0;
     this.camera.position.set(0, 6, 10.7); this.cameraController.shake = 0;
     ui.menu.classList.add('is-hidden'); ui.gameover.classList.add('is-hidden'); ui.hud.classList.add('is-visible'); ui.sideRecord.classList.add('is-hidden');
@@ -1392,56 +1319,25 @@ class Game {
   makeRemoteCart(playerId) {
     let cart = this.remoteCarts.get(playerId);
     if (cart) return cart;
-    cart = new Cart({ procedural: !this.multiplayerCartModel || !this.multiplayerRiderModel });
+    cart = new Cart({ procedural: false });
+    cart.reaction.visible = false; cart.shadow.visible = false;
     cart.shadow.material = new THREE.MeshBasicMaterial({ color: 0x5a3226, transparent: true, opacity: .19, depthWrite: false });
-    if (this.multiplayerCartModel) this.installMultiplayerCartModel(cart);
     this.scene.add(cart.group);
     this.remoteCarts.set(playerId, cart);
-    if (this.multiplayerRiderModel) this.installMultiplayerRiderModel(cart);
+    this.installMultiplayerCharacterModel(cart);
     return cart;
   }
-  setMultiplayerCartModel(model, size, scale) {
-    this.multiplayerCartModel = { model, size: size.clone(), scale };
-    for (const cart of this.remoteCarts.values()) this.installMultiplayerCartModel(cart);
+  setMultiplayerCharacterModel(characterAsset) {
+    this.multiplayerCharacterModel = characterAsset;
+    for (const cart of this.remoteCarts.values()) this.installMultiplayerCharacterModel(cart);
   }
-  installMultiplayerCartModel(cart) {
-    if (!this.multiplayerCartModel || cart.group.userData.hasMultiplayerCartModel) return;
-    const { model, size, scale } = this.multiplayerCartModel;
-    cart.removeProceduralCart();
-    cart.handleHalfWidth = size.x * scale * .47;
-    cart.handleY = size.y * scale - .03;
-    cart.handleZ = 1.29;
-    const riderOrigin = cart.riderPivot.position.clone().add(cart.rider.position);
-    cart.riderPivot.position.set(0, cart.handleY, cart.handleZ);
-    cart.rider.position.copy(riderOrigin).sub(cart.riderPivot.position);
-    cart.riderPivotBasePosition.copy(cart.riderPivot.position);
-    const clone = model.clone(true);
-    clone.name = 'modelo-carro-multiplayer';
-    clone.traverse((object) => {
-      if (object.isMesh) { object.castShadow = false; object.receiveShadow = false; }
-    });
-    cart.reaction.add(clone);
-    cart.group.userData.hasMultiplayerCartModel = true;
-  }
-  setMultiplayerRiderModel(model) {
-    this.multiplayerRiderModel = model;
-    for (const cart of this.remoteCarts.values()) this.installMultiplayerRiderModel(cart);
-  }
-  installMultiplayerRiderModel(cart) {
-    if (!this.multiplayerRiderModel || cart.group.userData.hasMultiplayerRiderModel) return;
-    for (const part of cart.proceduralRiderParts) part.visible = false;
-    const rider = this.multiplayerRiderModel.clone(true);
-    rider.name = 'modelo-personagem-multiplayer';
-    rider.traverse((object) => {
-      if (object.isMesh) { object.castShadow = false; object.receiveShadow = false; }
-    });
-    cart.rider.add(rider);
-    cart.removeProceduralRider();
-    cart.group.userData.hasMultiplayerRiderModel = true;
+  installMultiplayerCharacterModel(cart) {
+    installCharacterModel(cart, this.multiplayerCharacterModel, 'personagem-multiplayer-fast-boy');
   }
   startMultiplayer() {
     if (this.phase === 'mp-playing') return;
     this.start();
+    installCharacterModel(this.cart, this.multiplayerCharacterModel, 'personagem-principal-fast-boy');
     this.phase = 'mp-playing';
     this.mp.finished = false; this.mp.finalState = null; this.mp.resultsRequested = false; this.mp.syncTimer = 0; this.mp.uiTimer = 0;
     this.mp.racePlayerIds = [...this.mp.playerIds];
@@ -1625,7 +1521,7 @@ class Game {
     this.track.update(dt, spectatorSpeed);
     this.particles.update(dt);
     this.updateClouds(dt);
-    this.cart.group.position.y = .11 + Math.sin(this.time * 14) * .022;
+    this.cart.group.position.y = Math.sin(this.time * 14) * .022;
     this.cart.update(dt, spectatorSpeed, 0, 0, false);
     this.cameraController.update(dt, spectatorSpeed, true);
     this.updateMultiplayer(dt);
@@ -1655,7 +1551,7 @@ class Game {
     const wobble = this.impact > 0 ? Math.sin(this.time * 38) * this.impact * .055 : 0;
     this.playerX = clamp(this.playerX + (this.steerVelocity + wobble) * dt, -7.25, 7.25);
     this.cart.group.position.x = damp(this.cart.group.position.x, this.playerX, 11, dt);
-    this.cart.group.position.y = .11 + Math.sin(this.time * 14) * .022 + Math.max(0, this.impact) * .025;
+    this.cart.group.position.y = Math.sin(this.time * 14) * .022 + Math.max(0, this.impact) * .025;
     this.cart.group.rotation.y = damp(this.cart.group.rotation.y, -steer * .08 + this.impactVelocity * .05, 6, dt);
     this.cart.update(dt, this.speed, steer, this.impactVelocity * .075, true);
     this.impact = Math.max(0, this.impact - dt * 2.4); this.impactVelocity = damp(this.impactVelocity, 0, 5, dt);
@@ -1771,7 +1667,7 @@ class Game {
       const idleSpeed = this.phase === 'menu' ? 4.6 : 0;
       this.track.update(idleDt, idleSpeed);
       if (this.phase === 'menu') this.cart.group.position.x = 0;
-      this.cart.group.position.y = .11 + Math.sin(this.time * 2.2) * .055;
+      this.cart.group.position.y = Math.sin(this.time * 2.2) * .055;
       this.cart.update(idleDt, 4.5, 0, 0, false);
       this.cameraController.update(idleDt, 4.5, false);
       this.particles.update(idleDt);
