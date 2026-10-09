@@ -375,7 +375,7 @@ class TrackGenerator {
 }
 
 class Cart {
-  constructor({ procedural = true } = {}) {
+  constructor({ procedural = true, fallbackRider = false } = {}) {
     this.group = new THREE.Group(); this.wheels = []; this.reaction = new THREE.Group(); this.group.add(this.reaction);
     this.handleHalfWidth = .48; this.handleY = 1.16; this.handleZ = 1.29;
     this.riderWobbleTime = 0;
@@ -384,7 +384,7 @@ class Cart {
     } else {
       this.proceduralBasket = null; this.proceduralFrame = null; this.proceduralNose = null;
     }
-    this.buildRider(procedural);
+    this.buildRider(procedural || fallbackRider);
     this.group.add(this.reaction);
     this.shadow = new THREE.Mesh(new THREE.CircleGeometry(1.43, 28), new THREE.MeshBasicMaterial({ color: 0x22342d, transparent: true, opacity: .19, depthWrite: false }));
     this.shadow.rotation.x = -Math.PI / 2; this.shadow.scale.set(1.0, 1.55, 1); this.shadow.position.set(0, -.02, .1); this.group.add(this.shadow);
@@ -568,6 +568,8 @@ class Cart {
 
 function installCharacterModel(cart, characterAsset, name) {
   if (!characterAsset || cart.group.userData.hasMainCharacter) return;
+  cart.removeProceduralRider();
+  cart.reaction.visible = false;
   const character = characterAsset.scene.clone(true);
   character.name = name;
   character.traverse((object) => {
@@ -955,7 +957,7 @@ class Game {
     this.terrain = new THREE.Group(); this.terrain.rotation.x = -Math.asin(slope); this.scene.add(this.terrain);
     this.dynamicWorld = new THREE.Group(); this.dynamicWorld.rotation.x = -Math.asin(slope); this.scene.add(this.dynamicWorld);
     this.track = new TrackGenerator(this.scene, () => {});
-    this.cart = new Cart({ procedural: false }); this.cart.group.position.set(0, 0, 0);
+    this.cart = new Cart({ procedural: false, fallbackRider: true }); this.cart.group.position.set(0, 0, 0);
     this.cart.reaction.visible = false; this.cart.shadow.visible = false;
     this.cart.group.traverse((o) => { if (o.isMesh) { o.castShadow = o !== this.cart.shadow; o.receiveShadow = o !== this.cart.shadow; } }); this.scene.add(this.cart.group);
     this.cameraController = new CameraController(this.camera, this.cart.group);
@@ -1059,6 +1061,7 @@ class Game {
     this.uiUpdateTimer = 0; this.visualUpdateTimer = 0;
     clearTimeout(this.toastTimeout); ui.toast.classList.remove('is-visible'); ui.toast.textContent = '';
     this.phase = 'playing'; this.time = 0; this.distance = 0; this.score = 0; this.coinsCollected = 0; this.dodges = 0; this.hits = 0; this.maxSpeed = 0;
+    this.cart.reaction.visible = !this.cart.group.userData.hasMainCharacter;
     ui.coins.textContent = '0';
     this.health = MAX_COLLISIONS; this.combo = 1; this.comboTimer = 0; this.playerX = 0; this.steerVelocity = 0;
     this.key.left = false; this.key.right = false; this.pointerDown = false;
@@ -1086,6 +1089,7 @@ class Game {
   }
   toMenu() {
     this.phase = 'menu'; this.audio.setMotion(0, false);
+    if (!this.cart.group.userData.hasMainCharacter) this.cart.reaction.visible = false;
     gameRoot.style.setProperty('--rush', '0');
     clearTimeout(this.toastTimeout); ui.toast.classList.remove('is-visible'); ui.toast.textContent = '';
     ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.add('is-hidden'); ui.mpResult.classList.add('is-hidden'); ui.mpScore.classList.add('is-hidden');
@@ -1355,8 +1359,8 @@ class Game {
   makeRemoteCart(playerId) {
     let cart = this.remoteCarts.get(playerId);
     if (cart) return cart;
-    cart = new Cart({ procedural: false });
-    cart.reaction.visible = false; cart.shadow.visible = false;
+    cart = new Cart({ procedural: false, fallbackRider: true });
+    cart.reaction.visible = true; cart.shadow.visible = false;
     cart.shadow.material = new THREE.MeshBasicMaterial({ color: 0x5a3226, transparent: true, opacity: .19, depthWrite: false });
     this.scene.add(cart.group);
     this.remoteCarts.set(playerId, cart);
