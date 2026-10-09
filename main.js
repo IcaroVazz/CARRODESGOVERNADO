@@ -30,7 +30,6 @@ const SEGMENT_LENGTH = 54;
 const SEGMENT_COUNT = 6;
 const MAX_COLLISIONS = 1;
 const MP_SYNC_INTERVAL = .16;
-const MP_INTERPOLATION_DELAY_MS = 240;
 const MP_MAX_EXTRAPOLATION = .25;
 const number = (n) => Math.floor(n).toLocaleString('pt-BR');
 
@@ -655,7 +654,9 @@ class ObstacleManager {
       } else if (!entity.resolved && Math.abs(entity.group.position.z) < 2.1 && Math.abs(entity.group.position.x - playerX) < (entity.type === 'coin' ? 1.45 : 1.7)) {
         entity.resolved = true; this.hooks.onCollect(entity.kind, entity.group.position.x, entity.type);
       }
-      if (entity.resolved || entity.group.position.z > 13) {
+      const leftScreen = entity.group.position.z > 13;
+      const collected = entity.resolved && entity.type !== 'obstacle';
+      if (leftScreen || collected) {
         this.recycle(entity); this.entities.splice(i, 1);
       }
     }
@@ -1247,7 +1248,7 @@ class Game {
       speed: Math.max(0, Number(player.speed) || 0),
     };
 
-    const renderAt = now - MP_INTERPOLATION_DELAY_MS;
+    const renderAt = now;
     if (renderAt <= samples[0].receivedAt) return samples[0];
     for (let index = 1; index < samples.length; index++) {
       const older = samples[index - 1];
@@ -1400,19 +1401,12 @@ class Game {
       const cart = this.makeRemoteCart(id);
       cart.group.visible = true;
       const motion = this.interpolatedRemoteMotion(player, performance.now());
-      const playerSeat = this.mp.playerIds.indexOf(id);
-      const localSeat = this.mp.playerIds.indexOf(this.mp.playerId);
-      const row = Math.max(0, playerSeat < localSeat ? playerSeat : playerSeat - 1);
-      const progressOffset = Math.tanh((motion.distance - this.distance) / 90);
-      const rowZ = -7 - row * 2.6 - progressOffset * 1.1;
-      const halfHorizontalFov = Math.atan(Math.tan(this.camera.fov * Math.PI / 360) * this.camera.aspect);
-      const visibleDepth = (Math.abs(motion.x - this.camera.position.x) + 1.35) / Math.tan(halfHorizontalFov);
-      const visibleZ = this.camera.position.z - visibleDepth;
-      const targetZ = clamp(Math.min(rowZ, visibleZ), -28, -5.5);
+      const targetZ = this.distance - motion.distance;
       const hasMotion = cart.group.userData.hasRemoteMotion;
       const previousX = hasMotion ? cart.group.position.x : motion.x;
       cart.group.position.z = hasMotion ? damp(cart.group.position.z, targetZ, 10, dt) : targetZ;
       cart.group.position.x = hasMotion ? damp(cart.group.position.x, motion.x, 18, dt) : motion.x;
+      cart.group.position.y = slope * cart.group.position.z + Math.sin(this.time * 14) * .022;
       cart.group.userData.hasRemoteMotion = true;
       const remoteSteer = clamp((cart.group.position.x - previousX) / Math.max(dt, .001) / 6, -1, 1);
       cart.update(dt, motion.speed || this.speed, remoteSteer, 0, true);
