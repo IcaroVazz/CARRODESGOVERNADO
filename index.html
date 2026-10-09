@@ -23,7 +23,7 @@
         }
       }
     </script>
-    <script type="module" src="main.js?v=20261009-fbx-visible-fallback-1"></script>
+    <script type="module" src="main.js?v=20261009-fbx-progress-screen-1"></script>
   </head>
   <body>
     <main id="game" aria-label="Carrinho de Supermercado Desgovernado">
@@ -159,6 +159,18 @@
       </section>
 
       <footer class="bottomline"><span>DESCIDA Nº <b id="run-number">001</b></span><span id="bottom-tip">desvie. respire. repita.</span><span>FABRICADO SEM PLANO DE FUGA <b>✳</b></span></footer>
+      <section class="character-loading" id="character-loading" role="dialog" aria-modal="true" aria-labelledby="character-loading-title" aria-live="polite">
+        <div class="character-loading-card">
+          <span class="kicker"><i></i> PREPARANDO A CORRIDA</span>
+          <h2 id="character-loading-title">Baixando seu personagem</h2>
+          <p id="character-loading-message">Aguarde enquanto carregamos o modelo para iniciar.</p>
+          <div class="character-progress-track" id="character-progress-track" role="progressbar" aria-label="Download do personagem" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span class="character-progress-fill" id="character-progress"></span>
+          </div>
+          <div class="character-progress-copy"><strong id="character-progress-text">0%</strong><span id="character-progress-detail">Conectando ao servidor…</span></div>
+          <button class="primary-button character-retry" id="character-retry" type="button" hidden><span>TENTAR NOVAMENTE</span><b>↻</b></button>
+        </div>
+      </section>
     </main>
   </body>
 </html>

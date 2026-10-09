@@ -64,6 +64,10 @@ const ui = {
   mpResult: $('mp-result'), mpResultTitle: $('mp-result-title'), mpResults: $('mp-results'),
   mpWinnerLine: $('mp-winner-line'), mpRematch: $('mp-rematch'), mpExit: $('mp-exit'), mpRematchStatus: $('mp-rematch-status'),
   mpScore: $('mp-score'), mpScorePlayers: $('mp-score-players'),
+  characterLoading: $('character-loading'), characterLoadingTitle: $('character-loading-title'),
+  characterLoadingMessage: $('character-loading-message'), characterProgressTrack: $('character-progress-track'),
+  characterProgress: $('character-progress'), characterProgressText: $('character-progress-text'),
+  characterProgressDetail: $('character-progress-detail'), characterRetry: $('character-retry'),
 };
 
 class AudioManager {
@@ -375,7 +379,7 @@ class TrackGenerator {
 }
 
 class Cart {
-  constructor({ procedural = true, fallbackRider = false } = {}) {
+  constructor({ procedural = true } = {}) {
     this.group = new THREE.Group(); this.wheels = []; this.reaction = new THREE.Group(); this.group.add(this.reaction);
     this.handleHalfWidth = .48; this.handleY = 1.16; this.handleZ = 1.29;
     this.riderWobbleTime = 0;
@@ -384,7 +388,7 @@ class Cart {
     } else {
       this.proceduralBasket = null; this.proceduralFrame = null; this.proceduralNose = null;
     }
-    this.buildRider(procedural || fallbackRider);
+    this.buildRider(procedural);
     this.group.add(this.reaction);
     this.shadow = new THREE.Mesh(new THREE.CircleGeometry(1.43, 28), new THREE.MeshBasicMaterial({ color: 0x22342d, transparent: true, opacity: .19, depthWrite: false }));
     this.shadow.rotation.x = -Math.PI / 2; this.shadow.scale.set(1.0, 1.55, 1); this.shadow.position.set(0, -.02, .1); this.group.add(this.shadow);
@@ -794,29 +798,46 @@ class AssetManager {
   constructor(game) {
     this.game = game; this.loader = new GLTFLoader(); this.loader.setMeshoptDecoder(MeshoptDecoder); this.fbxLoader = new FBXLoader(); this.cartLoaded = true;
     this.riderPoseCache = new WeakMap();
+    this.characterLoadAttempt = 0;
     this.loadMainCharacter(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadMainCharacter() {
-    const url = new URL('./3DMODELS/fast_boy_in_quill.fbx?v=20261009-fbx-track-1', import.meta.url).href;
-    this.fbxLoader.load(url, (character) => {
-      removeCharacterTrackSurface(character);
-      const bounds = new THREE.Box3().setFromObject(character);
-      const size = bounds.getSize(new THREE.Vector3());
-      const center = bounds.getCenter(new THREE.Vector3());
-      if (!Number.isFinite(size.y) || size.y <= 0) {
-        console.warn('O modelo do personagem principal não tem dimensões válidas.');
-        return;
+    const url = new URL('./3DMODELS/fast_boy_in_quill.fbx', import.meta.url);
+    url.searchParams.set('v', '20261009-fbx-progress-screen-1');
+    url.searchParams.set('attempt', String(this.characterLoadAttempt));
+    this.game.setCharacterDownloadProgress(0, 0);
+    this.fbxLoader.load(url.href, (character) => {
+      this.game.setCharacterDownloadComplete();
+      try {
+        removeCharacterTrackSurface(character);
+        const bounds = new THREE.Box3().setFromObject(character);
+        const size = bounds.getSize(new THREE.Vector3());
+        const center = bounds.getCenter(new THREE.Vector3());
+        if (!Number.isFinite(size.y) || size.y <= 0) throw new Error('O arquivo não contém um personagem com dimensões válidas.');
+        const scale = 2.35 / size.y;
+        character.scale.setScalar(scale);
+        character.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+        character.rotation.y = Math.PI;
+        character.name = 'modelo-fast-boy-in-quill';
+        const characterAsset = { scene: character, animations: [{ duration: 2 / 3 }] };
+        this.game.characterAsset = characterAsset;
+        installCharacterModel(this.game.cart, characterAsset, 'personagem-principal-fast-boy');
+        this.game.setMultiplayerCharacterModel(characterAsset);
+        this.game.characterLoadReady();
+      } catch (error) {
+        console.warn('Não foi possível preparar fast_boy_in_quill.fbx.', error);
+        this.game.characterLoadFailed();
       }
-      const scale = 2.35 / size.y;
-      character.scale.setScalar(scale);
-      character.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
-      character.rotation.y = Math.PI;
-      character.name = 'modelo-fast-boy-in-quill';
-      const characterAsset = { scene: character, animations: [{ duration: 2 / 3 }] };
-      this.game.characterAsset = characterAsset;
-      installCharacterModel(this.game.cart, characterAsset, 'personagem-principal-fast-boy');
-      this.game.setMultiplayerCharacterModel(characterAsset);
-    }, undefined, (error) => console.warn('Não foi possível carregar fast_boy_in_quill.fbx.', error));
+    }, (event) => {
+      this.game.setCharacterDownloadProgress(event.loaded, event.total);
+    }, (error) => {
+      console.warn('Não foi possível baixar fast_boy_in_quill.fbx.', error);
+      this.game.characterLoadFailed();
+    });
+  }
+  retryMainCharacter() {
+    this.characterLoadAttempt += 1;
+    this.loadMainCharacter();
   }
   loadPickupModels() {
     const specs = [
@@ -883,6 +904,7 @@ class AssetManager {
 
 class Game {
   constructor() {
+    this.characterReady = false;
     this.phase = 'menu'; this.time = 0; this.distance = 0; this.score = 0; this.coinsCollected = 0; this.dodges = 0; this.hits = 0;
     this.maxSpeed = 0; this.speed = 15; this.targetSpeed = 15; this.health = MAX_COLLISIONS; this.combo = 1;
     this.comboTimer = 0; this.playerX = 0; this.steerVelocity = 0; this.lastSteer = 0;
@@ -957,7 +979,7 @@ class Game {
     this.terrain = new THREE.Group(); this.terrain.rotation.x = -Math.asin(slope); this.scene.add(this.terrain);
     this.dynamicWorld = new THREE.Group(); this.dynamicWorld.rotation.x = -Math.asin(slope); this.scene.add(this.dynamicWorld);
     this.track = new TrackGenerator(this.scene, () => {});
-    this.cart = new Cart({ procedural: false, fallbackRider: true }); this.cart.group.position.set(0, 0, 0);
+    this.cart = new Cart({ procedural: false }); this.cart.group.position.set(0, 0, 0);
     this.cart.reaction.visible = false; this.cart.shadow.visible = false;
     this.cart.group.traverse((o) => { if (o.isMesh) { o.castShadow = o !== this.cart.shadow; o.receiveShadow = o !== this.cart.shadow; } }); this.scene.add(this.cart.group);
     this.cameraController = new CameraController(this.camera, this.cart.group);
@@ -993,6 +1015,10 @@ class Game {
     const isTextEntry = (target) => target instanceof Element
       && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
     window.addEventListener('keydown', (e) => {
+      if (!this.characterReady) {
+        if (keyMap[e.code] || e.code === 'Enter') e.preventDefault();
+        return;
+      }
       if (keyMap[e.code] && !isTextEntry(e.target)) { e.preventDefault(); this.key[keyMap[e.code]] = true; }
       if (e.code === 'Enter' && (this.phase === 'menu' || this.phase === 'gameover')) this.start();
       else if (e.code === 'Enter' && this.phase === 'mp-lobby' && !ui.mpJoinBlock.classList.contains('is-hidden')) this.confirmJoin();
@@ -1041,6 +1067,7 @@ class Game {
     ui.mpLeave.addEventListener('click', () => this.leaveRoom());
     ui.mpRematch.addEventListener('click', () => this.requestRematch());
     ui.mpExit.addEventListener('click', () => this.leaveRoom());
+    ui.characterRetry.addEventListener('click', () => this.assets.retryMainCharacter());
     ui.sound.addEventListener('click', () => {
       this.audio.unlock(); this.audio.setEnabled(!this.audio.enabled);
       ui.soundState.textContent = this.audio.enabled ? 'ON' : 'OFF'; ui.soundIcon.textContent = this.audio.enabled ? '♫' : '♪';
@@ -1055,13 +1082,62 @@ class Game {
     ui.best.textContent = `${number(this.meterRecords)} m`; ui.run.textContent = String(this.runCount + 1).padStart(3, '0');
     ui.hints.classList.add('is-hidden'); ui.bottomline.classList.add('is-hidden'); ui.mobileControls.classList.add('is-hidden');
   }
+  setCharacterDownloadProgress(loaded, total) {
+    ui.characterLoading.hidden = false;
+    ui.characterRetry.hidden = true;
+    ui.characterLoading.classList.remove('is-indeterminate');
+    const hasTotal = Number.isFinite(total) && total > 0;
+    const downloadedMb = (Math.max(0, loaded || 0) / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+    if (hasTotal) {
+      const percent = clamp((loaded / total) * 100, 0, 100);
+      const totalMb = (total / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+      ui.characterLoadingTitle.textContent = percent >= 100 ? 'Preparando seu personagem' : 'Baixando seu personagem';
+      ui.characterLoadingMessage.textContent = percent >= 100
+        ? 'Download concluído. Finalizando o modelo para liberar o jogo.'
+        : 'Aguarde o download terminar para começar a corrida.';
+      ui.characterProgress.style.width = `${percent}%`;
+      ui.characterProgressTrack.setAttribute('aria-valuenow', String(Math.round(percent)));
+      ui.characterProgressText.textContent = `${Math.round(percent)}%`;
+      ui.characterProgressDetail.textContent = `${downloadedMb} MB de ${totalMb} MB`;
+    } else {
+      ui.characterLoadingTitle.textContent = 'Baixando seu personagem';
+      ui.characterLoadingMessage.textContent = 'Recebendo o modelo. O progresso total depende do servidor.';
+      ui.characterLoading.classList.add('is-indeterminate');
+      ui.characterProgressTrack.removeAttribute('aria-valuenow');
+      ui.characterProgressText.textContent = 'BAIXANDO';
+      ui.characterProgressDetail.textContent = `${downloadedMb} MB recebidos`;
+    }
+  }
+  setCharacterDownloadComplete() {
+    ui.characterLoadingTitle.textContent = 'Preparando seu personagem';
+    ui.characterLoadingMessage.textContent = 'Download concluído. Finalizando o modelo para liberar o jogo.';
+    ui.characterLoading.classList.remove('is-indeterminate');
+    ui.characterProgress.style.width = '100%';
+    ui.characterProgressTrack.setAttribute('aria-valuenow', '100');
+    ui.characterProgressText.textContent = '100%';
+    ui.characterProgressDetail.textContent = 'Download concluído';
+  }
+  characterLoadFailed() {
+    this.characterReady = false;
+    ui.characterLoading.hidden = false;
+    ui.characterLoading.classList.remove('is-indeterminate');
+    ui.characterLoadingTitle.textContent = 'Não foi possível carregar o personagem';
+    ui.characterLoadingMessage.textContent = 'Confira sua conexão e tente baixar o personagem novamente.';
+    ui.characterProgressText.textContent = 'DOWNLOAD COM FALHA';
+    ui.characterProgressDetail.textContent = 'O jogo permanece bloqueado até o modelo carregar.';
+    ui.characterRetry.hidden = false;
+  }
+  characterLoadReady() {
+    this.characterReady = true;
+    ui.characterLoading.hidden = true;
+  }
   start() {
+    if (!this.characterReady) return;
     this.audio.unlock(); this.audio.play('click');
     trackFirebaseEvent('game_start');
     this.uiUpdateTimer = 0; this.visualUpdateTimer = 0;
     clearTimeout(this.toastTimeout); ui.toast.classList.remove('is-visible'); ui.toast.textContent = '';
     this.phase = 'playing'; this.time = 0; this.distance = 0; this.score = 0; this.coinsCollected = 0; this.dodges = 0; this.hits = 0; this.maxSpeed = 0;
-    this.cart.reaction.visible = !this.cart.group.userData.hasMainCharacter;
     ui.coins.textContent = '0';
     this.health = MAX_COLLISIONS; this.combo = 1; this.comboTimer = 0; this.playerX = 0; this.steerVelocity = 0;
     this.key.left = false; this.key.right = false; this.pointerDown = false;
@@ -1089,7 +1165,6 @@ class Game {
   }
   toMenu() {
     this.phase = 'menu'; this.audio.setMotion(0, false);
-    if (!this.cart.group.userData.hasMainCharacter) this.cart.reaction.visible = false;
     gameRoot.style.setProperty('--rush', '0');
     clearTimeout(this.toastTimeout); ui.toast.classList.remove('is-visible'); ui.toast.textContent = '';
     ui.mpMenu.classList.add('is-hidden'); ui.mpLobby.classList.add('is-hidden'); ui.mpResult.classList.add('is-hidden'); ui.mpScore.classList.add('is-hidden');
@@ -1359,8 +1434,8 @@ class Game {
   makeRemoteCart(playerId) {
     let cart = this.remoteCarts.get(playerId);
     if (cart) return cart;
-    cart = new Cart({ procedural: false, fallbackRider: true });
-    cart.reaction.visible = true; cart.shadow.visible = false;
+    cart = new Cart({ procedural: false });
+    cart.reaction.visible = false; cart.shadow.visible = false;
     cart.shadow.material = new THREE.MeshBasicMaterial({ color: 0x5a3226, transparent: true, opacity: .19, depthWrite: false });
     this.scene.add(cart.group);
     this.remoteCarts.set(playerId, cart);
@@ -1375,6 +1450,7 @@ class Game {
     installCharacterModel(cart, this.multiplayerCharacterModel, 'personagem-multiplayer-fast-boy');
   }
   startMultiplayer() {
+    if (!this.characterReady) return;
     if (this.phase === 'mp-playing') return;
     this.start();
     installCharacterModel(this.cart, this.multiplayerCharacterModel, 'personagem-principal-fast-boy');

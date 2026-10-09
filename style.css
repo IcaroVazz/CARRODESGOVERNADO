@@ -102,6 +102,20 @@ button { color: inherit; font: inherit; }
 .bottomline { z-index: 2; bottom: 17px; color: rgba(241,249,255,.91); text-shadow: 0 1px 8px rgba(17,46,72,.55); pointer-events: none; }
 .bottomline b { color: var(--yellow); font-weight: 500; }
 .is-hidden { opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+.character-loading { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 24px; background: linear-gradient(135deg, rgba(233,246,255,.97), rgba(195,226,246,.95)); color: var(--ink); }
+.character-loading[hidden] { display: none; }
+.character-loading-card { width: min(470px, 100%); padding: clamp(28px, 6vw, 48px); background: rgba(250,253,255,.88); border: 1px solid rgba(23,57,87,.12); box-shadow: 0 24px 70px rgba(23,57,87,.18); }
+.character-loading-card .kicker { font-size: 8px; }
+.character-loading-card h2 { margin: 24px 0 9px; font-size: clamp(27px, 5vw, 39px); line-height: 1; letter-spacing: -.06em; }
+.character-loading-card > p { min-height: 40px; margin: 0 0 24px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.character-progress-track { height: 10px; overflow: hidden; background: rgba(23,57,87,.12); border-radius: 99px; }
+.character-progress-fill { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #2788d3, #55bce2); border-radius: inherit; transition: width .15s ease; }
+.character-loading.is-indeterminate .character-progress-fill { width: 34%; animation: character-progress-sweep 1.15s ease-in-out infinite alternate; }
+@keyframes character-progress-sweep { from { transform: translateX(-12%); } to { transform: translateX(210%); } }
+.character-progress-copy { display: flex; justify-content: space-between; gap: 16px; margin-top: 11px; font: 9px var(--mono); letter-spacing: .04em; color: var(--muted); }
+.character-progress-copy strong { color: var(--orange); font-size: 12px; font-variant-numeric: tabular-nums; }
+.character-retry { width: 100%; margin-top: 25px; }
+.character-retry[hidden] { display: none; }
 .gameover-overlay { display: grid; place-items: center; background: rgba(15,43,69,.74); backdrop-filter: blur(5px); }
 .gameover-card { position: relative; z-index: 1; width: min(490px, calc(100% - 34px)); padding: 36px 43px 30px; background: var(--paper); box-shadow: 12px 13px 0 rgba(52,145,207,.82); transform: rotate(-1deg); }
 .gameover-card .kicker { font-size: 8px; }
