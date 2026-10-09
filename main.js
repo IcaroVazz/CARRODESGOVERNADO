@@ -638,8 +638,11 @@ class ObstacleManager {
       if (entity.float) {
         entity.group.position.y = Math.sin(entity.age * 3) * .14;
         entity.model.rotation.y += dt * 1.2;
-        if (entity.type === 'coin' && magnet && entity.group.position.z < 5 && entity.group.position.z > -15) {
-          entity.group.position.x = damp(entity.group.position.x, playerX, 3.8, dt);
+        if (entity.type === 'coin' && magnet && entity.group.position.z < 7 && entity.group.position.z > -56) {
+          const horizontalPull = 20 + speed * .55;
+          const forwardPull = 26 + speed * .8;
+          entity.group.position.x = damp(entity.group.position.x, playerX, horizontalPull, dt);
+          entity.group.position.z = damp(entity.group.position.z, 0, forwardPull, dt);
         }
       }
       if (entity.type === 'obstacle') {
@@ -857,7 +860,7 @@ class Game {
     this.mp = {
       code: null, role: null, playerId: null, hostId: null, playerIds: [], players: [], allPlayers: [], racePlayerIds: [],
       unsubscribe: null, heartbeat: 0, syncTimer: 0, uiTimer: 0,
-      finished: false, finalState: null, resultsRequested: false, rematchStarting: false,
+      finished: false, finalState: null, resultsRequested: false,
       pingSeen: new Map(), motionBuffers: new Map(), motionSignatures: new Map(),
     };
     this.remoteCarts = new Map();
@@ -1264,7 +1267,8 @@ class Game {
     let x = latest.x;
     if (previous) {
       const span = (latest.receivedAt - previous.receivedAt) / 1000;
-      if (span > .02) x = clamp(latest.x + clamp((latest.x - previous.x) / span, -7, 7) * ahead, -7.25, 7.25);
+      const maxLateralSpeed = Math.max(7, (Number(latest.speed) || 17) * .38);
+      if (span > .02) x = clamp(latest.x + clamp((latest.x - previous.x) / span, -maxLateralSpeed, maxLateralSpeed) * ahead, -7.25, 7.25);
     }
     return { x, distance: latest.distance + latest.speed * ahead, speed: latest.speed };
   }
@@ -1305,15 +1309,11 @@ class Game {
       if (room.status === 'playing') { this.startMultiplayer(); return; }
       const rematch = room.rematch || {};
       const readyCount = this.mp.playerIds.filter((id) => rematch[id]).length;
-      ui.mpRematchStatus.textContent = readyCount > 0
-        ? `${readyCount} de ${this.mp.playerIds.length} prontos para outra corrida.` : '';
-      if (this.mp.role === 'host' && !this.mp.rematchStarting
-        && this.mp.playerIds.length >= 2 && this.mp.playerIds.every((id) => rematch[id])) {
-        this.mp.rematchStarting = true;
-        void startMultiplayerRematch(this.mp.code)
-          .catch(() => this.setMpStatus('Não foi possível preparar a revanche.'))
-          .finally(() => { this.mp.rematchStarting = false; });
-      }
+      ui.mpRematchStatus.textContent = this.mp.role === 'host'
+        ? `${readyCount} de ${this.mp.playerIds.length} prontos. Você pode iniciar outra corrida nesta sala quando quiser.`
+        : rematch[this.mp.playerId]
+          ? 'Você está pronto. Aguardando o anfitrião iniciar outra corrida nesta sala.'
+          : 'Aguardando o anfitrião iniciar outra corrida nesta sala.';
     }
     if (room.status === 'finished' && this.phase === 'mp-playing') this.showMultiplayerResult(room);
   }
@@ -1489,6 +1489,9 @@ class Game {
       ? 'Empate técnico na ladeira.'
       : room.winner === this.mp.playerId ? '🏆 Você venceu a corrida!' : `🏆 Jogador ${winnerSeat} venceu a corrida!`;
     ui.mpRematchStatus.textContent = '';
+    const rematchLabel = ui.mpRematch.querySelector('span');
+    if (rematchLabel) rematchLabel.textContent = this.mp.role === 'host' ? 'INICIAR OUTRA CORRIDA' : 'ESTOU PRONTO';
+    ui.mpRematch.disabled = false;
     ui.mpResult.classList.remove('is-hidden');
     ui.phase.textContent = 'PARTIDA ENCERRADA';
   }
@@ -1496,11 +1499,31 @@ class Game {
     this.audio.play('click');
     if (!this.mp.code) return;
     ui.mpRematch.disabled = true;
-    ui.mpRematchStatus.textContent = 'Registrando sua confirmação…';
+    if (this.mp.role === 'host') {
+      ui.mpRematchStatus.textContent = 'Preparando outra corrida na mesma sala…';
+      void startMultiplayerRematch(this.mp.code, this.mp.playerId)
+        .then((started) => { if (!started) throw new Error('unavailable'); })
+        .catch((error) => {
+          const messages = {
+            'need-players': 'É preciso ter pelo menos dois participantes na sala.',
+            'not-host': 'Somente o anfitrião pode iniciar outra corrida.',
+            unavailable: 'A sala não está disponível para outra corrida.',
+            'not-found': 'A sala não está mais disponível.',
+          };
+          ui.mpRematchStatus.textContent = messages[error.message] || 'Não foi possível iniciar outra corrida.';
+        })
+        .finally(() => { if (this.phase === 'mp-result') ui.mpRematch.disabled = false; });
+      return;
+    }
+    ui.mpRematchStatus.textContent = 'Registrando que você está pronto…';
     void requestMultiplayerRematch(this.mp.code, this.mp.playerId)
-      .then(() => { ui.mpRematchStatus.textContent = 'Aguardando os outros participantes…'; })
+      .then(() => {
+        ui.mpRematchStatus.textContent = 'Você está pronto. Aguardando o anfitrião iniciar outra corrida nesta sala.';
+        const rematchLabel = ui.mpRematch.querySelector('span');
+        if (rematchLabel) rematchLabel.textContent = 'PRONTO';
+      })
       .catch(() => { ui.mpRematchStatus.textContent = 'A sala não está mais disponível.'; })
-      .finally(() => { ui.mpRematch.disabled = false; });
+      .finally(() => { if (this.phase === 'mp-result') ui.mpRematch.disabled = false; });
   }
   leaveRoom(silent = false) {
     if (this.mp.code) void leaveMultiplayerRoom(this.mp.code, this.mp.role, this.mp.playerId);
@@ -1534,24 +1557,28 @@ class Game {
     }
     this.time += dt;
     const diff = this.difficulty();
-    const scoreForSpeed = this.score + Math.floor(this.distance * 10);
-    const speedProgress = clamp(scoreForSpeed / 18000, 0, 1);
-    this.targetSpeed = lerp(17, 40, speedProgress);
+    const speedProgress = clamp(this.distance / 3600, 0, 1);
+    const easedSpeedProgress = speedProgress * speedProgress * (3 - 2 * speedProgress);
+    this.targetSpeed = lerp(17, 40, easedSpeedProgress);
     if (this.key.down) this.targetSpeed = Math.max(10, this.targetSpeed - 7);
     if (this.powerup === 'turbo') this.targetSpeed *= 1.48;
     if (this.powerup === 'coffee-power') this.targetSpeed *= 1.83;
     if (this.powerup === 'brake') this.targetSpeed *= .56;
-    this.speed = damp(this.speed, this.targetSpeed, this.speed < this.targetSpeed ? 1.3 : 3.3, dt);
-    this.speed += Math.sin(this.time * .67) * .19;
+    const acceleratingPower = this.powerup === 'turbo' || this.powerup === 'coffee-power';
+    const accelerationRate = acceleratingPower ? 4.2 : 1.15;
+    const decelerationRate = this.powerup === 'brake' ? 3.8 : 2.8;
+    this.speed += clamp(this.targetSpeed - this.speed, -decelerationRate * dt, accelerationRate * dt);
     this.distance += this.speed * dt;
     this.maxSpeed = Math.max(this.maxSpeed, this.speed * 2.45);
     const left = this.key.left ? -1 : 0; const right = this.key.right ? 1 : 0;
     const steer = clamp(left + right + this.mobileSteer + (this.mouseSteer ?? 0), -1, 1);
-    const wantedVelocity = steer * (5.4 + this.speed * .055);
-    this.steerVelocity = steer === 0 ? 0 : damp(this.steerVelocity, wantedVelocity, 7.5, dt);
+    const speedFactor = clamp(this.speed / 17, 1, 2.3);
+    const wantedVelocity = steer * 6.2 * speedFactor;
+    const steerResponse = lerp(7.5, 11, clamp((this.speed - 17) / 23, 0, 1));
+    this.steerVelocity = steer === 0 ? 0 : damp(this.steerVelocity, wantedVelocity, steerResponse, dt);
     const wobble = this.impact > 0 ? Math.sin(this.time * 38) * this.impact * .055 : 0;
     this.playerX = clamp(this.playerX + (this.steerVelocity + wobble) * dt, -7.25, 7.25);
-    this.cart.group.position.x = damp(this.cart.group.position.x, this.playerX, 11, dt);
+    this.cart.group.position.x = damp(this.cart.group.position.x, this.playerX, 11 + speedFactor * 2.5, dt);
     this.cart.group.position.y = Math.sin(this.time * 14) * .022 + Math.max(0, this.impact) * .025;
     this.cart.group.rotation.y = damp(this.cart.group.rotation.y, -steer * .08 + this.impactVelocity * .05, 6, dt);
     this.cart.update(dt, this.speed, steer, this.impactVelocity * .075, true);

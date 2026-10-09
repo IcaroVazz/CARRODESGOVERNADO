@@ -229,15 +229,16 @@ export async function requestMultiplayerRematch(code, playerId) {
   });
 }
 
-export async function startMultiplayerRematch(code) {
+export async function startMultiplayerRematch(code, hostId) {
   const roomRef = doc(db, 'rooms', code);
   return runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(roomRef);
     if (!snapshot.exists()) throw new Error('not-found');
     const room = snapshot.data();
+    if (room.hostId !== hostId) throw new Error('not-host');
     const playerIds = room.playerIds || [];
     if (room.status !== 'finished') return false;
-    if (playerIds.length < 2 || !playerIds.every((id) => room.rematch?.[id])) return false;
+    if (playerIds.length < 2) throw new Error('need-players');
     const playerRefs = playerIds.map((id) => doc(db, 'rooms', code, 'players', id));
     const playerSnapshots = await Promise.all(playerRefs.map((playerRef) => transaction.get(playerRef)));
     if (playerSnapshots.some((player) => !player.exists())) throw new Error('unavailable');
