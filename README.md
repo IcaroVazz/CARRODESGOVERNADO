@@ -41,7 +41,7 @@ As coleções são criadas automaticamente pelo Firestore quando o primeiro docu
 
 ## Modelos 3D e cenário
 
-O personagem principal e todos os participantes do modo online usam `fast_boy_in_quill.glb`, com a animação incluída no modelo. Obstáculos e itens usam os modelos de `3DMODELS/`, ajustados para a pista. As laterais têm casas e prédios procedurais em Three.js, apoiados em terreno contínuo e reciclados com os segmentos da estrada.
+O personagem principal e todos os participantes do modo online usam `fast_boy_in_quill.fbx`, com a animação em quadros incluída no modelo e a pista removida. Obstáculos e itens usam os modelos de `3DMODELS/`, ajustados para a pista. As laterais têm casas e prédios procedurais em Three.js, apoiados em terreno contínuo e reciclados com os segmentos da estrada.
 
 - **Fast Boy in Quill** — Allen.Michael, [Sketchfab](https://sketchfab.com/3d-models/fast-boy-in-quill-d2850f50920e44889ada8053eef90b09), sob licença [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
 

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import {
   createMultiplayerRoom,
@@ -598,6 +599,38 @@ function installCharacterModel(cart, characterAsset, name) {
   cart.group.userData.hasMainCharacter = true;
 }
 
+function removeCharacterTrackSurface(character) {
+  character.traverse((object) => {
+    if (!object.isMesh || !/^Gordin_baked_\d{4}$/.test(object.name)) return;
+    const geometry = object.geometry;
+    const position = geometry.getAttribute('position');
+    const [trackGroup, ...characterGroups] = geometry.groups;
+    if (!position || trackGroup?.materialIndex !== 1 || trackGroup.count > 600) return;
+
+    const trackBounds = new THREE.Box3();
+    const point = new THREE.Vector3();
+    for (let i = trackGroup.start; i < trackGroup.start + trackGroup.count; i++) {
+      trackBounds.expandByPoint(point.set(position.getX(i), position.getY(i), position.getZ(i)));
+    }
+    const trackSize = trackBounds.getSize(new THREE.Vector3());
+    if (trackSize.x < 18 || trackSize.z < 50) return;
+
+    const bounds = new THREE.Box3(
+      new THREE.Vector3(Infinity, Infinity, Infinity),
+      new THREE.Vector3(-Infinity, -Infinity, -Infinity),
+    );
+    for (const group of characterGroups) {
+      for (let i = group.start; i < group.start + group.count; i++) {
+        bounds.expandByPoint(point.set(position.getX(i), position.getY(i), position.getZ(i)));
+      }
+    }
+    geometry.clearGroups();
+    for (const group of characterGroups) geometry.addGroup(group.start, group.count, group.materialIndex);
+    geometry.boundingBox = bounds;
+    geometry.boundingSphere = new THREE.Sphere().setFromBox3(bounds);
+  });
+}
+
 class ObstacleManager {
   constructor(world, hooks) {
     this.world = world; this.hooks = hooks; this.entities = []; this.distanceToObstacle = 72; this.distanceToCoins = 27;
@@ -757,14 +790,14 @@ class ParticleSystem {
 
 class AssetManager {
   constructor(game) {
-    this.game = game; this.loader = new GLTFLoader(); this.loader.setMeshoptDecoder(MeshoptDecoder); this.cartLoaded = true;
+    this.game = game; this.loader = new GLTFLoader(); this.loader.setMeshoptDecoder(MeshoptDecoder); this.fbxLoader = new FBXLoader(); this.cartLoaded = true;
     this.riderPoseCache = new WeakMap();
     this.loadMainCharacter(); this.loadObstacleModels(); this.loadPickupModels();
   }
   loadMainCharacter() {
-    const url = new URL('./3DMODELS/fast_boy_in_quill.glb?v=20261009-meshopt-1', import.meta.url).href;
-    this.loader.load(url, (gltf) => {
-      const character = gltf.scene;
+    const url = new URL('./3DMODELS/fast_boy_in_quill.fbx?v=20261009-fbx-track-1', import.meta.url).href;
+    this.fbxLoader.load(url, (character) => {
+      removeCharacterTrackSurface(character);
       const bounds = new THREE.Box3().setFromObject(character);
       const size = bounds.getSize(new THREE.Vector3());
       const center = bounds.getCenter(new THREE.Vector3());
@@ -777,11 +810,11 @@ class AssetManager {
       character.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
       character.rotation.y = Math.PI;
       character.name = 'modelo-fast-boy-in-quill';
-      const characterAsset = { scene: character, animations: gltf.animations || [] };
+      const characterAsset = { scene: character, animations: [{ duration: 2 / 3 }] };
       this.game.characterAsset = characterAsset;
       installCharacterModel(this.game.cart, characterAsset, 'personagem-principal-fast-boy');
       this.game.setMultiplayerCharacterModel(characterAsset);
-    }, undefined, (error) => console.warn('Não foi possível carregar fast_boy_in_quill.glb.', error));
+    }, undefined, (error) => console.warn('Não foi possível carregar fast_boy_in_quill.fbx.', error));
   }
   loadPickupModels() {
     const specs = [
